@@ -1,0 +1,13 @@
+[package]
+name = "filelens"
+version = "0.1.0"
+edition = "2024"
+
+description = "Herramienta CLI interactiva para visualizar metadata de archivos"
+authors = ["FileLens Contributors"]
+license = "MIT"
+
+[dependencies]
+chrono = { version = "0.4", features = ["clock"] }
+comfy-table = "7"
+console = "0.15"
