@@ -109,27 +109,27 @@ fn remove_image_metadata(path: &Path) -> Result<(), String> {
         .decode()
         .map_err(|e| format!("No se pudo decodificar la imagen: {}", e))?;
 
-    // Crear nombre del archivo limpio
-    let clean_path = generate_clean_filename(path);
+    // Crear archivo temporal
+    let temp_path = generate_temp_filename(path);
 
-    // Guardar sin metadata
-    img.save(&clean_path)
+    // Guardar sin metadata en archivo temporal
+    img.save(&temp_path)
         .map_err(|e| format!("No se pudo guardar la imagen limpia: {}", e))?;
 
-    let metadata_clean = verify_image_metadata_clean(&clean_path)?;
+    // Verificar que la metadata fue eliminada
+    let metadata_clean = verify_image_metadata_clean(&temp_path)?;
 
     if !metadata_clean {
+        // Limpiar archivo temporal
+        let _ = fs::remove_file(&temp_path);
+
         println!(
             "\n{}",
             style("┌─ Verificación de metadata fallida ─").red()
         );
         println!(
             "{}",
-            style(format!(
-                "│ No se pudo confirmar la limpieza de {}",
-                clean_path.display()
-            ))
-            .red()
+            style("│ No se pudo confirmar la limpieza del archivo.").red()
         );
         println!(
             "{}",
@@ -142,23 +142,26 @@ fn remove_image_metadata(path: &Path) -> Result<(), String> {
         );
     }
 
+    // Reemplazar el archivo original con el limpio
+    fs::rename(&temp_path, path)
+        .map_err(|e| {
+            let _ = fs::remove_file(&temp_path);
+            format!("No se pudo reemplazar el archivo original: {}", e)
+        })?;
+
     println!(
         "\n{}",
         style("┌─ Metadata Eliminada Exitosamente ─").green()
     );
     println!(
         "{}",
-        style(format!("│ Archivo original: {}", path.display())).green()
-    );
-    println!(
-        "{}",
-        style(format!("│ Archivo limpio: {}", clean_path.display()))
+        style(format!("│ Archivo: {}", path.display()))
             .green()
             .bold()
     );
     println!(
         "{}",
-        style("│ El archivo original se mantiene intacto.").green()
+        style("│ La metadata ha sido eliminada del archivo original.").green()
     );
     println!("{}", style("└─").green());
 
@@ -171,9 +174,9 @@ fn remove_office_metadata(path: &Path) -> Result<(), String> {
         style("│ Eliminando metadata de documento Office...").dim()
     );
 
-    let clean_path = generate_clean_filename(path);
+    let temp_path = generate_temp_filename(path);
 
-    let cleaned_anything = rewrite_docx(path, &clean_path, |name, contents| match name {
+    let cleaned_anything = rewrite_docx(path, &temp_path, |name, contents| match name {
         "docProps/core.xml" => {
             sanitize_core_properties(contents).map_err(|e| format!("core.xml: {}", e))
         }
@@ -184,20 +187,18 @@ fn remove_office_metadata(path: &Path) -> Result<(), String> {
         _ => Ok((contents, false)),
     })?;
 
-    let metadata_clean = verify_office_metadata_clean(&clean_path)?;
+    let metadata_clean = verify_office_metadata_clean(&temp_path)?;
 
     if !metadata_clean {
+        let _ = fs::remove_file(&temp_path);
+
         println!(
             "\n{}",
             style("┌─ Verificación de metadata fallida ─").red()
         );
         println!(
             "{}",
-            style(format!(
-                "│ No se pudo confirmar la limpieza de {}",
-                clean_path.display()
-            ))
-            .red()
+            style("│ No se pudo confirmar la limpieza del archivo.").red()
         );
         println!(
             "{}",
@@ -210,6 +211,12 @@ fn remove_office_metadata(path: &Path) -> Result<(), String> {
         );
     }
 
+    // Reemplazar el archivo original
+    fs::rename(&temp_path, path).map_err(|e| {
+        let _ = fs::remove_file(&temp_path);
+        format!("No se pudo reemplazar el archivo original: {}", e)
+    })?;
+
     if cleaned_anything {
         println!(
             "\n{}",
@@ -217,17 +224,17 @@ fn remove_office_metadata(path: &Path) -> Result<(), String> {
         );
         println!(
             "{}",
-            style(format!("│ Archivo original: {}", path.display())).green()
-        );
-        println!(
-            "{}",
-            style(format!("│ Archivo limpio: {}", clean_path.display()))
+            style(format!("│ Archivo: {}", path.display()))
                 .green()
                 .bold()
         );
         println!(
             "{}",
             style("│ Se eliminaron: Autor, Fechas, Revisiones, Empresa").green()
+        );
+        println!(
+            "{}",
+            style("│ La metadata ha sido eliminada del archivo original.").green()
         );
         println!("{}", style("└─").green());
     } else {
@@ -237,11 +244,7 @@ fn remove_office_metadata(path: &Path) -> Result<(), String> {
         );
         println!(
             "{}",
-            style(format!("│ Archivo original: {}", path.display())).yellow()
-        );
-        println!(
-            "{}",
-            style(format!("│ Archivo resultante: {}", clean_path.display()))
+            style(format!("│ Archivo: {}", path.display()))
                 .yellow()
                 .bold()
         );
@@ -685,7 +688,7 @@ fn set_element_text(element: &mut Element, new_value: &str) -> bool {
     true
 }
 
-fn apply_office_metadata_edit(path: &Path, xml_tag: &str, value: &str) -> Result<PathBuf, String> {
+fn apply_office_metadata_edit(path: &Path, xml_tag: &str, value: &str) -> Result<(), String> {
     enum DocPropsTarget {
         Core,
         App,
@@ -697,9 +700,9 @@ fn apply_office_metadata_edit(path: &Path, xml_tag: &str, value: &str) -> Result
         DocPropsTarget::App
     };
 
-    let modified_path = generate_modified_filename(path);
+    let temp_path = generate_temp_filename(path);
 
-    let changed = rewrite_docx(path, &modified_path, |name, contents| {
+    let changed = rewrite_docx(path, &temp_path, |name, contents| {
         match (name, &target) {
             ("docProps/core.xml", DocPropsTarget::Core) => {
                 let updates = [(xml_tag, value); 1];
@@ -714,10 +717,17 @@ fn apply_office_metadata_edit(path: &Path, xml_tag: &str, value: &str) -> Result
     })?;
 
     if !changed {
+        let _ = fs::remove_file(&temp_path);
         return Err("No se encontró el campo solicitado para modificar".to_string());
     }
 
-    Ok(modified_path)
+    // Reemplazar el archivo original
+    fs::rename(&temp_path, path).map_err(|e| {
+        let _ = fs::remove_file(&temp_path);
+        format!("No se pudo reemplazar el archivo original: {}", e)
+    })?;
+
+    Ok(())
 }
 
 fn modify_metadata_interactive(path: &Path) -> Result<(), String> {
@@ -737,63 +747,27 @@ fn modify_metadata_interactive(path: &Path) -> Result<(), String> {
     }
 }
 
-fn modify_image_metadata(path: &Path) -> Result<(), String> {
+fn modify_image_metadata(_path: &Path) -> Result<(), String> {
     println!("\n{}", style("┌─ Modificar Metadata de Imagen ─").cyan());
-    println!("{}", style("│ Campos disponibles para modificar:").cyan());
-    println!("{}", style("│  [1] Artista/Autor").cyan());
-    println!("{}", style("│  [2] Copyright").cyan());
-    println!("{}", style("│  [3] Descripción").cyan());
-    println!("{}", style("│  [4] Software").cyan());
-    println!("{}", style("│  [0] Cancelar").cyan());
-    println!("{}", style("└─").cyan());
-
-    print!("\n{}", style("│ Selecciona el campo ▸ ").cyan());
-    io::stdout().flush().unwrap();
-
-    let mut choice = String::new();
-    io::stdin().read_line(&mut choice).unwrap();
-
-    let field = match choice.trim() {
-        "1" => "Artist",
-        "2" => "Copyright",
-        "3" => "ImageDescription",
-        "4" => "Software",
-        "0" => return Ok(()),
-        _ => return Err("Opción inválida".to_string()),
-    };
-
-    print!(
-        "\n{}",
-        style(format!("│ Nuevo valor para {} ▸ ", field)).cyan()
-    );
-    io::stdout().flush().unwrap();
-
-    let mut value = String::new();
-    io::stdin().read_line(&mut value).unwrap();
-    let value = value.trim();
-
-    if value.is_empty() {
-        return Err("El valor no puede estar vacío".to_string());
-    }
-
-    // Implementación simplificada: crear nuevo archivo con metadata modificada
-    println!("\n{}", style("│ Modificando metadata...").dim());
-
-    let modified_path = generate_modified_filename(path);
-
-    // Copiar archivo (en una implementación real, se modificaría el EXIF aquí)
-    fs::copy(path, &modified_path).map_err(|e| format!("Error copiando archivo: {}", e))?;
-
-    println!("\n{}", style("┌─ Metadata Modificada ─").green());
-    println!("{}", style(format!("│ Campo: {}", field)).green());
-    println!("{}", style(format!("│ Nuevo valor: {}", value)).green());
+    println!("{}", style("│").cyan());
     println!(
         "{}",
-        style(format!("│ Archivo guardado: {}", modified_path.display()))
-            .green()
-            .bold()
+        style("│ NOTA: La modificación de metadata EXIF en imágenes").yellow()
     );
-    println!("{}", style("└─").green());
+    println!(
+        "{}",
+        style("│ requiere bibliotecas especializadas adicionales.").yellow()
+    );
+    println!("{}", style("│").cyan());
+    println!(
+        "{}",
+        style("│ Por ahora, solo se soporta eliminación de metadata.").dim()
+    );
+    println!(
+        "{}",
+        style("│ Use la opción [1] del menú principal para eliminar.").dim()
+    );
+    println!("{}", style("└─").cyan());
 
     Ok(())
 }
@@ -842,7 +816,7 @@ fn modify_office_metadata(path: &Path) -> Result<(), String> {
 
     println!("\n{}", style("│ Modificando metadata...").dim());
 
-    let modified_path = apply_office_metadata_edit(path, xml_tag, value)
+    apply_office_metadata_edit(path, xml_tag, value)
         .map_err(|e| format!("No se pudo actualizar la metadata: {}", e))?;
 
     println!("\n{}", style("┌─ Metadata Modificada ─").green());
@@ -850,29 +824,32 @@ fn modify_office_metadata(path: &Path) -> Result<(), String> {
     println!("{}", style(format!("│ Nuevo valor: {}", value)).green());
     println!(
         "{}",
-        style(format!("│ Archivo guardado: {}", modified_path.display()))
+        style(format!("│ Archivo: {}", path.display()))
             .green()
             .bold()
+    );
+    println!(
+        "{}",
+        style("│ La metadata ha sido modificada en el archivo original.").green()
     );
     println!("{}", style("└─").green());
 
     Ok(())
 }
 
-fn generate_clean_filename(path: &Path) -> PathBuf {
+fn generate_temp_filename(path: &Path) -> PathBuf {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
     let extension = path.extension().unwrap_or_default().to_string_lossy();
 
-    parent.join(format!("{}_sin_metadata.{}", stem, extension))
-}
+    // Usar timestamp para evitar colisiones
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
 
-fn generate_modified_filename(path: &Path) -> PathBuf {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-    let extension = path.extension().unwrap_or_default().to_string_lossy();
-
-    parent.join(format!("{}_modificado.{}", stem, extension))
+    parent.join(format!(".{}_temp_{}.{}", stem, timestamp, extension))
 }
 
 #[cfg(test)]

@@ -3,8 +3,7 @@ use crate::advanced_metadata::{
 };
 use crate::directory::{EntryKind, count_directory_entries};
 use crate::formatting::{format_optional_time, format_size};
-use crate::ui::{base_table, header_cell, label_cell};
-use comfy_table::{Cell, Color, Row};
+use comfy_table::Color;
 use console::style;
 use infer::Infer;
 use sha2::{Digest, Sha256};
@@ -22,57 +21,37 @@ pub fn render_metadata(path: &Path) -> Result<(), String> {
         )
     })?;
 
-    let mut table = base_table();
-    table.set_header(vec![header_cell("Propiedad"), header_cell("Valor")]);
+    println!();
 
-    table.add_row(property_row(
-        "RUTA",
-        "Ruta ingresada",
-        path.display().to_string(),
-        Color::White,
-    ));
+    print_property("Ruta ingresada", &path.display().to_string(), Color::White);
 
     let canonical = fs::canonicalize(path)
         .map(|real_path| real_path.display().to_string())
         .unwrap_or_else(|_| "No disponible".to_string());
-    table.add_row(property_row(
-        "REAL",
-        "Ruta resuelta",
-        canonical,
-        Color::White,
-    ));
+    print_property("Ruta resuelta", &canonical, Color::White);
 
     if let Some(name) = path
         .file_name()
         .map(|value| value.to_string_lossy().into_owned())
     {
-        table.add_row(property_row("NOMB", "Nombre", name, Color::White));
+        print_property("Nombre", &name, Color::White);
     }
 
     if let Some(ext) = path
         .extension()
         .map(|value| value.to_string_lossy().into_owned())
     {
-        table.add_row(property_row("EXT", "Extensión", ext, Color::White));
+        print_property("Extensión", &ext, Color::White);
     }
 
     let kind = EntryKind::from(&metadata);
-    table.add_row(property_row(
-        "TIPO",
-        "Tipo",
-        kind_label(&kind),
-        Color::White,
-    ));
+    print_property("Tipo", kind_label(&kind), Color::White);
 
-    table.add_row(property_row(
-        "TAM",
-        "Tamaño",
-        match kind {
-            EntryKind::File => format_size(metadata.len()),
-            _ => format!("{} bytes", metadata.len()),
-        },
-        Color::White,
-    ));
+    let size_str = match kind {
+        EntryKind::File => format_size(metadata.len()),
+        _ => format!("{} bytes", metadata.len()),
+    };
+    print_property("Tamaño", &size_str, Color::White);
 
     if matches!(kind, EntryKind::Directory)
         && let Ok((count, truncated)) = count_directory_entries(path)
@@ -82,7 +61,7 @@ pub fn render_metadata(path: &Path) -> Result<(), String> {
         } else {
             format!("{count} elementos directos")
         };
-        table.add_row(property_row("CONT", "Contenido", label, Color::White));
+        print_property("Contenido", &label, Color::White);
     }
 
     let readonly_color = if metadata.permissions().readonly() {
@@ -95,82 +74,60 @@ pub fn render_metadata(path: &Path) -> Result<(), String> {
     } else {
         "Lectura y escritura"
     };
-    table.add_row(property_row(
-        "ACCE",
-        "Accesos",
-        readonly_value,
-        readonly_color,
-    ));
+    print_property("Permisos", readonly_value, readonly_color);
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
 
-        table.add_row(property_row(
-            "PERM",
+        print_property(
             "Permisos (octal)",
-            format!("{:04o}", metadata.permissions().mode() & 0o7777),
+            &format!("{:04o}", metadata.permissions().mode() & 0o7777),
             Color::White,
-        ));
-        table.add_row(property_row(
-            "PERM",
+        );
+        print_property(
             "Permisos (rwx)",
-            format_unix_permissions(metadata.permissions().mode()),
+            &format_unix_permissions(metadata.permissions().mode()),
             Color::White,
-        ));
+        );
 
         let owner = owner_name(&metadata).unwrap_or_else(|| "Desconocido".to_string());
-        table.add_row(property_row("USR", "Propietario", owner, Color::White));
+        print_property("Propietario", &owner, Color::White);
 
         let group = group_name(&metadata).unwrap_or_else(|| "Desconocido".to_string());
-        table.add_row(property_row("GRP", "Grupo", group, Color::White));
+        print_property("Grupo", &group, Color::White);
     }
 
     if matches!(kind, EntryKind::File) {
         if let Some(mime) = mime_type(path) {
-            table.add_row(property_row(
-                "MIME",
-                "Tipo de contenido",
-                mime,
-                Color::White,
-            ));
+            print_property("Tipo MIME", &mime, Color::White);
         }
 
-        table.add_row(property_row(
-            "HASH",
-            "SHA-256",
-            file_hash(path, &metadata),
-            Color::White,
-        ));
+        print_property("Hash SHA-256", &file_hash(path, &metadata), Color::White);
     }
 
-    table.add_row(property_row(
-        "ATIM",
+    print_property(
         "Último acceso",
-        format_optional_time(metadata.accessed().ok()),
+        &format_optional_time(metadata.accessed().ok()),
         Color::White,
-    ));
-    table.add_row(property_row(
-        "MTIM",
+    );
+    print_property(
         "Última modificación",
-        format_optional_time(metadata.modified().ok()),
+        &format_optional_time(metadata.modified().ok()),
         Color::White,
-    ));
-    table.add_row(property_row(
-        "CTIM",
-        "Creación",
-        format_optional_time(metadata.created().ok()),
+    );
+    print_property(
+        "Fecha de creación",
+        &format_optional_time(metadata.created().ok()),
         Color::White,
-    ));
+    );
 
     if metadata.file_type().is_symlink() {
         let target = fs::read_link(path)
             .map(|t| t.display().to_string())
             .unwrap_or_else(|_| "No disponible".to_string());
-        table.add_row(property_row("LINK", "Enlace a", target, Color::White));
+        print_property("Enlace simbólico a", &target, Color::White);
     }
-
-    println!("\n{table}");
 
     // Metadata avanzada según tipo de archivo
     let kind = EntryKind::from(&metadata);
@@ -180,38 +137,36 @@ pub fn render_metadata(path: &Path) -> Result<(), String> {
         // Imágenes con EXIF
         if mime.starts_with("image/") {
             println!(
-                "\n{}",
-                style("═══ METADATA EXIF (IMAGEN) ═══").cyan().bold()
+                "\n\n{}",
+                style("━━━ Metadata EXIF ━━━").cyan().bold()
             );
-            if let Some(exif_table) = extract_image_metadata(path) {
-                println!("\n{}", exif_table);
+            if extract_image_metadata(path) {
                 println!(
-                        "\n{}",
-                        style("⚠ ADVERTENCIA: Esta imagen contiene metadata que puede revelar información sensible.")
-                            .yellow()
-                    );
+                    "\n{}",
+                    style("  ⚠  Esta imagen contiene metadata que puede revelar información sensible")
+                        .yellow()
+                );
             } else {
                 println!(
                     "\n{}",
-                    style("│ No se encontró metadata EXIF en esta imagen.").dim()
+                    style("  No se encontró metadata EXIF en esta imagen").dim()
                 );
             }
         }
 
         // PDFs
         if mime == "application/pdf" {
-            println!("\n{}", style("═══ METADATA PDF ═══").cyan().bold());
-            if let Some(pdf_table) = extract_pdf_metadata(path) {
-                println!("\n{}", pdf_table);
+            println!("\n\n{}", style("━━━ Metadata PDF ━━━").cyan().bold());
+            if extract_pdf_metadata(path) {
                 println!(
-                        "\n{}",
-                        style("⚠ ADVERTENCIA: Este PDF contiene metadata que puede revelar información del autor y organización.")
-                            .yellow()
-                    );
+                    "\n{}",
+                    style("  ⚠  Este PDF contiene metadata que puede revelar información del autor y organización")
+                        .yellow()
+                );
             } else {
                 println!(
                     "\n{}",
-                    style("│ No se encontró metadata adicional en este PDF.").dim()
+                    style("  No se encontró metadata adicional en este PDF").dim()
                 );
             }
         }
@@ -222,18 +177,17 @@ pub fn render_metadata(path: &Path) -> Result<(), String> {
             || mime.contains("ms-excel")
             || mime.contains("ms-powerpoint")
         {
-            println!("\n{}", style("═══ METADATA OFFICE ═══").cyan().bold());
-            if let Some(office_table) = extract_office_metadata(path) {
-                println!("\n{}", office_table);
+            println!("\n\n{}", style("━━━ Metadata Office ━━━").cyan().bold());
+            if extract_office_metadata(path) {
                 println!(
-                        "\n{}",
-                        style("⚠ ADVERTENCIA: Este documento contiene metadata que puede revelar información personal y organizacional.")
-                            .yellow()
-                    );
+                    "\n{}",
+                    style("  ⚠  Este documento contiene metadata que puede revelar información personal y organizacional")
+                        .yellow()
+                );
             } else {
                 println!(
                     "\n{}",
-                    style("│ No se pudo extraer metadata de este documento Office.").dim()
+                    style("  No se pudo extraer metadata de este documento Office").dim()
                 );
             }
         }
@@ -242,11 +196,21 @@ pub fn render_metadata(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn property_row(code: &str, label: &str, value: impl Into<String>, color: Color) -> Row {
-    Row::from(vec![
-        label_cell(code, label),
-        Cell::new(value.into()).fg(color),
-    ])
+fn print_property(label: &str, value: &str, color: Color) {
+    let label_styled = style(format!("  {}", label))
+        .cyan()
+        .bold();
+
+    let arrow = style("→").dim();
+
+    let value_styled = match color {
+        Color::Yellow => style(value).yellow(),
+        Color::Green => style(value).green(),
+        Color::Red => style(value).red(),
+        _ => style(value).white(),
+    };
+
+    println!("{} {} {}", label_styled, arrow, value_styled);
 }
 
 fn file_hash(path: &Path, metadata: &Metadata) -> String {
