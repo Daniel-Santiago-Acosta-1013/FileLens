@@ -29,6 +29,24 @@ limpiar una carpeta completa y FileLens mostrará toda la información relevante
 - [Rust](https://www.rust-lang.org/) 1.74 o superior (el proyecto usa la edición
   2024 del lenguaje).
 
+## Instalación del binario
+
+```bash
+./scripts/install.sh
+```
+
+El comando compila FileLens en modo `release` y copia el binario generado a
+`/usr/local/bin` (requiere permisos de escritura en esa ruta). Si prefieres otro
+destino puedes personalizarlo con variables de entorno, por ejemplo:
+
+```bash
+PREFIX="$HOME/.local" ./scripts/install.sh
+```
+
+Tras la instalación asegúrate de que el directorio elegido esté en tu `PATH`.
+Cuando el binario esté accesible bastará con ejecutar `filelens` desde cualquier
+directorio del sistema.
+
 ## Cómo ejecutar
 
 ```bash
