@@ -24,7 +24,6 @@ impl EntryKind {
             Self::Other
         }
     }
-
 }
 
 pub fn count_directory_entries(path: &Path) -> Result<(usize, bool), String> {

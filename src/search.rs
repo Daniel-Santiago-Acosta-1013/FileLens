@@ -1,5 +1,8 @@
+use console::style;
+use indicatif::{ProgressBar, ProgressStyle};
 use std::env;
 use std::path::PathBuf;
+use std::time::Duration;
 use walkdir::WalkDir;
 
 pub fn find_files(filename: &str) -> Vec<PathBuf> {
@@ -12,9 +15,30 @@ pub fn find_files(filename: &str) -> Vec<PathBuf> {
         format!("{}/Desktop", home_dir),
     ];
 
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .tick_strings(&["▹▹▹", "▸▹▹", "▹▸▹", "▹▹▸", "▹▹▹"])
+            .template("{spinner:.cyan} {msg}")
+            .unwrap(),
+    );
+    spinner.enable_steady_tick(Duration::from_millis(120));
+
     let mut results = Vec::new();
 
     for search_path in search_paths {
+        let path_name = search_path
+            .replace(&home_dir, "~")
+            .split('/')
+            .last()
+            .unwrap_or("")
+            .to_string();
+        spinner.set_message(
+            style(format!("Buscando en {}...", path_name))
+                .dim()
+                .to_string(),
+        );
+
         let matches: Vec<PathBuf> = WalkDir::new(&search_path)
             .max_depth(15)
             .follow_links(false)
@@ -32,6 +56,8 @@ pub fn find_files(filename: &str) -> Vec<PathBuf> {
 
         results.extend(matches);
     }
+
+    spinner.finish_and_clear();
 
     results.sort();
     results.dedup();
