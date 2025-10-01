@@ -175,68 +175,69 @@ pub fn render_metadata(path: &Path) -> Result<(), String> {
     // Metadata avanzada según tipo de archivo
     let kind = EntryKind::from(&metadata);
     if matches!(kind, EntryKind::File)
-        && let Some(mime) = mime_type(path) {
-            // Imágenes con EXIF
-            if mime.starts_with("image/") {
+        && let Some(mime) = mime_type(path)
+    {
+        // Imágenes con EXIF
+        if mime.starts_with("image/") {
+            println!(
+                "\n{}",
+                style("═══ METADATA EXIF (IMAGEN) ═══").cyan().bold()
+            );
+            if let Some(exif_table) = extract_image_metadata(path) {
+                println!("\n{}", exif_table);
                 println!(
-                    "\n{}",
-                    style("═══ METADATA EXIF (IMAGEN) ═══").cyan().bold()
-                );
-                if let Some(exif_table) = extract_image_metadata(path) {
-                    println!("\n{}", exif_table);
-                    println!(
                         "\n{}",
                         style("⚠ ADVERTENCIA: Esta imagen contiene metadata que puede revelar información sensible.")
                             .yellow()
                     );
-                } else {
-                    println!(
-                        "\n{}",
-                        style("│ No se encontró metadata EXIF en esta imagen.").dim()
-                    );
-                }
+            } else {
+                println!(
+                    "\n{}",
+                    style("│ No se encontró metadata EXIF en esta imagen.").dim()
+                );
             }
+        }
 
-            // PDFs
-            if mime == "application/pdf" {
-                println!("\n{}", style("═══ METADATA PDF ═══").cyan().bold());
-                if let Some(pdf_table) = extract_pdf_metadata(path) {
-                    println!("\n{}", pdf_table);
-                    println!(
+        // PDFs
+        if mime == "application/pdf" {
+            println!("\n{}", style("═══ METADATA PDF ═══").cyan().bold());
+            if let Some(pdf_table) = extract_pdf_metadata(path) {
+                println!("\n{}", pdf_table);
+                println!(
                         "\n{}",
                         style("⚠ ADVERTENCIA: Este PDF contiene metadata que puede revelar información del autor y organización.")
                             .yellow()
                     );
-                } else {
-                    println!(
-                        "\n{}",
-                        style("│ No se encontró metadata adicional en este PDF.").dim()
-                    );
-                }
+            } else {
+                println!(
+                    "\n{}",
+                    style("│ No se encontró metadata adicional en este PDF.").dim()
+                );
             }
+        }
 
-            // Documentos Office
-            if mime.contains("officedocument")
-                || mime.contains("msword")
-                || mime.contains("ms-excel")
-                || mime.contains("ms-powerpoint")
-            {
-                println!("\n{}", style("═══ METADATA OFFICE ═══").cyan().bold());
-                if let Some(office_table) = extract_office_metadata(path) {
-                    println!("\n{}", office_table);
-                    println!(
+        // Documentos Office
+        if mime.contains("officedocument")
+            || mime.contains("msword")
+            || mime.contains("ms-excel")
+            || mime.contains("ms-powerpoint")
+        {
+            println!("\n{}", style("═══ METADATA OFFICE ═══").cyan().bold());
+            if let Some(office_table) = extract_office_metadata(path) {
+                println!("\n{}", office_table);
+                println!(
                         "\n{}",
                         style("⚠ ADVERTENCIA: Este documento contiene metadata que puede revelar información personal y organizacional.")
                             .yellow()
                     );
-                } else {
-                    println!(
-                        "\n{}",
-                        style("│ No se pudo extraer metadata de este documento Office.").dim()
-                    );
-                }
+            } else {
+                println!(
+                    "\n{}",
+                    style("│ No se pudo extraer metadata de este documento Office.").dim()
+                );
             }
         }
+    }
 
     Ok(())
 }

@@ -103,24 +103,26 @@ pub fn extract_image_metadata(path: &Path) -> Option<Table> {
 
     // GPS - CRÍTICO PARA PRIVACIDAD
     if let Some(lat) = exif.get_field(exif::Tag::GPSLatitude, exif::In::PRIMARY)
-        && let Some(lat_ref) = exif.get_field(exif::Tag::GPSLatitudeRef, exif::In::PRIMARY) {
-            table.add_row(property_row_warning(
-                "GPS Latitud",
-                format!("{} {}", lat.display_value(), lat_ref.display_value()),
-                "⚠ UBICACIÓN SENSIBLE",
-            ));
-            has_data = true;
-        }
+        && let Some(lat_ref) = exif.get_field(exif::Tag::GPSLatitudeRef, exif::In::PRIMARY)
+    {
+        table.add_row(property_row_warning(
+            "GPS Latitud",
+            format!("{} {}", lat.display_value(), lat_ref.display_value()),
+            "⚠ UBICACIÓN SENSIBLE",
+        ));
+        has_data = true;
+    }
 
     if let Some(lon) = exif.get_field(exif::Tag::GPSLongitude, exif::In::PRIMARY)
-        && let Some(lon_ref) = exif.get_field(exif::Tag::GPSLongitudeRef, exif::In::PRIMARY) {
-            table.add_row(property_row_warning(
-                "GPS Longitud",
-                format!("{} {}", lon.display_value(), lon_ref.display_value()),
-                "⚠ UBICACIÓN SENSIBLE",
-            ));
-            has_data = true;
-        }
+        && let Some(lon_ref) = exif.get_field(exif::Tag::GPSLongitudeRef, exif::In::PRIMARY)
+    {
+        table.add_row(property_row_warning(
+            "GPS Longitud",
+            format!("{} {}", lon.display_value(), lon_ref.display_value()),
+            "⚠ UBICACIÓN SENSIBLE",
+        ));
+        has_data = true;
+    }
 
     if let Some(field) = exif.get_field(exif::Tag::GPSAltitude, exif::In::PRIMARY) {
         table.add_row(property_row_warning(

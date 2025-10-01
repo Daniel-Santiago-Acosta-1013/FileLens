@@ -2,6 +2,7 @@ mod advanced_metadata;
 mod directory;
 mod formatting;
 mod metadata;
+mod metadata_editor;
 mod search;
 mod ui;
 
@@ -118,7 +119,25 @@ fn show_metadata(path: &Path) {
     println!();
     if let Err(error) = metadata::render_metadata(path) {
         println!("\n{}", style(format!("│ Error: {}", error)).red());
+        return;
     }
+
+    // Preguntar si desea editar/eliminar metadata
+    println!();
+    print!(
+        "{}",
+        style("│ ¿Deseas editar o eliminar metadata? (s/n) ▸ ").cyan()
+    );
+    io::stdout().flush().unwrap();
+
+    let mut response = String::new();
+    io::stdin().read_line(&mut response).unwrap();
+    let response = response.trim().to_lowercase();
+
+    if matches!(response.as_str(), "s" | "si" | "y" | "yes")
+        && let Err(error) = metadata_editor::show_edit_menu(path) {
+            println!("\n{}", style(format!("│ Error: {}", error)).red());
+        }
 }
 
 fn ask_continue() -> bool {
