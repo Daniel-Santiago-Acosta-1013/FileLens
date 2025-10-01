@@ -1,44 +1,44 @@
 # FileLens
 
 FileLens es una herramienta de línea de comandos escrita en Rust que permite
-inspeccionar la metadata de archivos y directorios de forma interactiva. Solo
-necesita que escribas la ruta o utilices la navegación integrada y te mostrará
-información relevante como tamaño, propietario, fechas, hash y tipo de
-contenido.
+inspeccionar y sanear metadata de archivos **e** interaccionar con directorios
+completos desde una interfaz totalmente interactiva. El flujo guía paso a paso:
+solo selecciona desde el menú si deseas analizar un archivo individual o
+limpiar una carpeta completa y FileLens mostrará toda la información relevante.
 
-## Características
+## Capacidades principales
 
-- Interfaz 100% interactiva, sin argumentos, con cabecera y tablas
-  minimalistas.
-- Navegación integrada con comandos `ls`, `cd`, índices numerados y `ver` para
-  explorar cualquier directorio sin salir de la aplicación.
-- Metadatos enriquecidos: tamaño legible, conteo de elementos de carpetas,
-  propietario y grupo (Unix), permisos en octal y `rwx`, tipo MIME, hash
-  SHA-256 (archivos ≤ 32 MiB) y fechas de acceso, modificación y creación.
-- Detección automática del tipo de recurso: archivo, directorio o enlace
-  simbólico, incluido el destino de los enlaces.
-- Mensajes claros ante cualquier error de lectura u operación no permitida.
+- **Menú principal con historial**: selecciona entre analizar un archivo o
+  ejecutar limpieza masiva. Los campos aceptan edición completa con flechas y
+  recuerdan rutas usadas durante la sesión.
+- **Análisis detallado de archivos**: muestra tamaño legible, permisos en
+  octal y `rwx`, propietario/grupo (Unix), tipo MIME, hash SHA-256
+  (archivos ≤ 32 MiB), fechas clave y destino de enlaces simbólicos.
+- **Informe inteligente de directorios**: antes de limpiar, enumera todas las
+  extensiones encontradas, destaca las compatibles con limpieza (imágenes y
+  documentos Office) e incluye conteos exactos por categoría.
+- **Limpieza masiva controlada**: permite decidir si incluir subdirectorios y
+  filtrar por imágenes, documentos Office o ambos. Muestra progreso archivo por
+  archivo y un resumen final de éxito/errores.
+- **Edición interactiva de metadata**: tras analizar un archivo compatible se
+  puede abrir un menú para eliminar metadata o modificar campos específicos de
+  documentos Office.
 
 ## Requisitos
 
 - [Rust](https://www.rust-lang.org/) 1.74 o superior (el proyecto usa la edición
   2024 del lenguaje).
 
-## Uso
+## Cómo ejecutar
 
 ```bash
 # Ejecuta la aplicación en modo interactivo
 cargo run
 ```
 
-Comandos principales dentro de la sesión interactiva:
-
-- `ls`: refresca el contenido del directorio actual y muestra índices.
-- `cd <ruta|número>`: navega a una carpeta (acepta rutas absolutas, relativas o
-  el índice del listado más reciente).
-- `ver <ruta|número>` o escribir directamente una ruta/índice: muestra la
-  metadata detallada.
-- `..`, `salir`, `exit` o `Ctrl+D`: retroceder o finalizar según corresponda.
+Dentro de la sesión utiliza el menú principal para escoger la operación. En los
+prompts puedes editar con las flechas izquierda/derecha y recuperar rutas
+anteriores con ↑/↓ gracias al historial integrado.
 
 ## Pruebas
 
@@ -46,10 +46,11 @@ Para verificar que el proyecto compila correctamente y que la interfaz
 interactiva responde como se espera, ejecuta:
 
 ```bash
+# Validar la compilación
 cargo check
 
-# Ejemplo de recorrido automatizado: abrir la primera entrada y salir
-printf '1\nsalir\n' | cargo run
+# Ejecutar toda la batería de pruebas
+cargo test
 ```
 
 ## Licencia
