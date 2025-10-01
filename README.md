@@ -2,20 +2,22 @@
 
 FileLens es una herramienta de línea de comandos escrita en Rust que permite
 inspeccionar la metadata de archivos y directorios de forma interactiva. Solo
-necesita que escribas la ruta del recurso que quieras analizar y te mostrará
-información relevante como tamaño, fechas de modificación o permisos.
+necesita que escribas la ruta o utilices la navegación integrada y te mostrará
+información relevante como tamaño, propietario, fechas, hash y tipo de
+contenido.
 
 ## Características
 
-- Interfaz 100% interactiva (no recibe argumentos).
-- Presentación estilizada con cabecera y tabla de resultados para una lectura
-  clara y profesional.
+- Interfaz 100% interactiva, sin argumentos, con cabecera y tablas
+  minimalistas.
+- Navegación integrada con comandos `ls`, `cd`, índices numerados y `ver` para
+  explorar cualquier directorio sin salir de la aplicación.
+- Metadatos enriquecidos: tamaño legible, conteo de elementos de carpetas,
+  propietario y grupo (Unix), permisos en octal y `rwx`, tipo MIME, hash
+  SHA-256 (archivos ≤ 32 MiB) y fechas de acceso, modificación y creación.
 - Detección automática del tipo de recurso: archivo, directorio o enlace
-  simbólico.
-- Muestra tamaños, permisos (incluyendo formato octal y `rwx` en sistemas
-  tipo Unix) y fechas de acceso, modificación y creación cuando están
-  disponibles.
-- Manejo de errores legible cuando la ruta no existe o no puede consultarse.
+  simbólico, incluido el destino de los enlaces.
+- Mensajes claros ante cualquier error de lectura u operación no permitida.
 
 ## Requisitos
 
@@ -29,8 +31,14 @@ información relevante como tamaño, fechas de modificación o permisos.
 cargo run
 ```
 
-Dentro de la aplicación, escribe la ruta del archivo o directorio que quieras
-inspeccionar. Para salir puedes escribir `salir`, `exit` o presionar `Ctrl+D`.
+Comandos principales dentro de la sesión interactiva:
+
+- `ls`: refresca el contenido del directorio actual y muestra índices.
+- `cd <ruta|número>`: navega a una carpeta (acepta rutas absolutas, relativas o
+  el índice del listado más reciente).
+- `ver <ruta|número>` o escribir directamente una ruta/índice: muestra la
+  metadata detallada.
+- `..`, `salir`, `exit` o `Ctrl+D`: retroceder o finalizar según corresponda.
 
 ## Pruebas
 
@@ -40,8 +48,8 @@ interactiva responde como se espera, ejecuta:
 ```bash
 cargo check
 
-# Ejemplo de ejecución automatizada con una ruta y salir
-printf 'Cargo.toml\nexit\n' | cargo run
+# Ejemplo de recorrido automatizado: abrir la primera entrada y salir
+printf '1\nsalir\n' | cargo run
 ```
 
 ## Licencia

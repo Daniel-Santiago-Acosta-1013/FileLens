@@ -11,3 +11,6 @@ license = "MIT"
 chrono = { version = "0.4", features = ["clock"] }
 comfy-table = "7"
 console = "0.15"
+infer = "0.15"
+sha2 = "0.10"
+users = "0.11"
