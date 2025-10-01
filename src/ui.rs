@@ -17,3 +17,19 @@ pub fn render_header() {
     );
     println!("{}\n", style(format!("└{}┘", border)).cyan());
 }
+
+pub fn render_file_input_hint() {
+    let hint_lines = [
+        "┌─ Puedes ingresar:",
+        "│   • Un nombre con extensión (ej. reporte.pdf)",
+        "│   • Una ruta relativa (ej. ./docs/reporte.pdf)",
+        "│   • Una ruta absoluta (ej. /Users/usuario/reporte.pdf)",
+        "└─",
+    ];
+
+    for line in hint_lines.iter() {
+        println!("{}", style(line).cyan().dim());
+    }
+
+    println!();
+}

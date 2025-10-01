@@ -136,15 +136,14 @@ pub fn render_metadata(path: &Path) -> Result<(), String> {
     {
         // Imágenes con EXIF
         if mime.starts_with("image/") {
-            println!(
-                "\n\n{}",
-                style("━━━ Metadata EXIF ━━━").cyan().bold()
-            );
+            println!("\n\n{}", style("━━━ Metadata EXIF ━━━").cyan().bold());
             if extract_image_metadata(path) {
                 println!(
                     "\n{}",
-                    style("  ⚠  Esta imagen contiene metadata que puede revelar información sensible")
-                        .yellow()
+                    style(
+                        "  ⚠  Esta imagen contiene metadata que puede revelar información sensible"
+                    )
+                    .yellow()
                 );
             } else {
                 println!(
@@ -197,9 +196,7 @@ pub fn render_metadata(path: &Path) -> Result<(), String> {
 }
 
 fn print_property(label: &str, value: &str, color: Color) {
-    let label_styled = style(format!("  {}", label))
-        .cyan()
-        .bold();
+    let label_styled = style(format!("  {}", label)).cyan().bold();
 
     let arrow = style("→").dim();
 

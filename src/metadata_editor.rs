@@ -123,10 +123,7 @@ fn remove_image_metadata(path: &Path) -> Result<(), String> {
         // Limpiar archivo temporal
         let _ = fs::remove_file(&temp_path);
 
-        println!(
-            "\n{}",
-            style("┌─ Verificación de metadata fallida ─").red()
-        );
+        println!("\n{}", style("┌─ Verificación de metadata fallida ─").red());
         println!(
             "{}",
             style("│ No se pudo confirmar la limpieza del archivo.").red()
@@ -143,11 +140,10 @@ fn remove_image_metadata(path: &Path) -> Result<(), String> {
     }
 
     // Reemplazar el archivo original con el limpio
-    fs::rename(&temp_path, path)
-        .map_err(|e| {
-            let _ = fs::remove_file(&temp_path);
-            format!("No se pudo reemplazar el archivo original: {}", e)
-        })?;
+    fs::rename(&temp_path, path).map_err(|e| {
+        let _ = fs::remove_file(&temp_path);
+        format!("No se pudo reemplazar el archivo original: {}", e)
+    })?;
 
     println!(
         "\n{}",
@@ -192,10 +188,7 @@ fn remove_office_metadata(path: &Path) -> Result<(), String> {
     if !metadata_clean {
         let _ = fs::remove_file(&temp_path);
 
-        println!(
-            "\n{}",
-            style("┌─ Verificación de metadata fallida ─").red()
-        );
+        println!("\n{}", style("┌─ Verificación de metadata fallida ─").red());
         println!(
             "{}",
             style("│ No se pudo confirmar la limpieza del archivo.").red()
@@ -352,29 +345,25 @@ fn verify_image_metadata_clean(path: &Path) -> Result<bool, String> {
             "No se pudo leer metadata EXIF durante la verificación: {}",
             err
         )),
-        Err(other) => Err(format!(
-            "Error verificando metadata EXIF: {}",
-            other
-        )),
+        Err(other) => Err(format!("Error verificando metadata EXIF: {}", other)),
     }
 }
 
 fn verify_office_metadata_clean(path: &Path) -> Result<bool, String> {
     use std::fs::File;
-    use zip::result::ZipError;
     use zip::ZipArchive;
+    use zip::result::ZipError;
 
     let file = File::open(path)
         .map_err(|e| format!("No se pudo abrir archivo limpio para verificación: {}", e))?;
-    let mut archive = ZipArchive::new(file)
-        .map_err(|e| format!("No es un documento Office válido: {}", e))?;
+    let mut archive =
+        ZipArchive::new(file).map_err(|e| format!("No es un documento Office válido: {}", e))?;
 
     let core_clean = match archive.by_name("docProps/core.xml") {
         Ok(mut file) => {
             let mut contents = Vec::new();
-            file.read_to_end(&mut contents).map_err(|e| {
-                format!("No se pudo leer core.xml durante la verificación: {}", e)
-            })?;
+            file.read_to_end(&mut contents)
+                .map_err(|e| format!("No se pudo leer core.xml durante la verificación: {}", e))?;
             is_xml_metadata_clean(&contents, &CORE_SANITIZE_FIELDS, core_field_spec)?
         }
         Err(ZipError::FileNotFound) => true,
@@ -382,16 +371,15 @@ fn verify_office_metadata_clean(path: &Path) -> Result<bool, String> {
             return Err(format!(
                 "No se pudo acceder a core.xml durante la verificación: {}",
                 e
-            ))
+            ));
         }
     };
 
     let app_clean = match archive.by_name("docProps/app.xml") {
         Ok(mut file) => {
             let mut contents = Vec::new();
-            file.read_to_end(&mut contents).map_err(|e| {
-                format!("No se pudo leer app.xml durante la verificación: {}", e)
-            })?;
+            file.read_to_end(&mut contents)
+                .map_err(|e| format!("No se pudo leer app.xml durante la verificación: {}", e))?;
             is_xml_metadata_clean(&contents, &APP_SANITIZE_FIELDS, app_field_spec)?
         }
         Err(ZipError::FileNotFound) => true,
@@ -399,7 +387,7 @@ fn verify_office_metadata_clean(path: &Path) -> Result<bool, String> {
             return Err(format!(
                 "No se pudo acceder a app.xml durante la verificación: {}",
                 e
-            ))
+            ));
         }
     };
 
@@ -416,7 +404,7 @@ fn verify_office_metadata_clean(path: &Path) -> Result<bool, String> {
             return Err(format!(
                 "No se pudo acceder a custom.xml durante la verificación: {}",
                 e
-            ))
+            ));
         }
     };
 
@@ -428,8 +416,12 @@ fn is_xml_metadata_clean(
     expected_values: &[(&str, &str)],
     lookup: fn(&str) -> Option<FieldSpec<'static>>,
 ) -> Result<bool, String> {
-    let root = Element::parse(Cursor::new(contents))
-        .map_err(|e| format!("Error leyendo XML de metadata durante la verificación: {}", e))?;
+    let root = Element::parse(Cursor::new(contents)).map_err(|e| {
+        format!(
+            "Error leyendo XML de metadata durante la verificación: {}",
+            e
+        )
+    })?;
 
     for &(tag, expected) in expected_values {
         if let Some(spec) = lookup(tag)
@@ -450,7 +442,10 @@ fn is_custom_metadata_clean(contents: &[u8]) -> Result<bool, String> {
     let root = Element::parse(Cursor::new(contents))
         .map_err(|e| format!("Error leyendo custom.xml durante la verificación: {}", e))?;
 
-    let has_property_elements = root.children.iter().any(|node| matches!(node, XMLNode::Element(_)));
+    let has_property_elements = root
+        .children
+        .iter()
+        .any(|node| matches!(node, XMLNode::Element(_)));
     let has_text = root.children.iter().any(|node| {
         if let XMLNode::Text(text) = node {
             !text.trim().is_empty()
@@ -462,11 +457,7 @@ fn is_custom_metadata_clean(contents: &[u8]) -> Result<bool, String> {
     Ok(!has_property_elements && !has_text)
 }
 
-fn element_matches_expected_value(
-    root: &Element,
-    spec: FieldSpec<'_>,
-    expected: &str,
-) -> bool {
+fn element_matches_expected_value(root: &Element, spec: FieldSpec<'_>, expected: &str) -> bool {
     for node in root.children.iter() {
         if let XMLNode::Element(child) = node
             && element_matches(child, &spec)
@@ -702,18 +693,16 @@ fn apply_office_metadata_edit(path: &Path, xml_tag: &str, value: &str) -> Result
 
     let temp_path = generate_temp_filename(path);
 
-    let changed = rewrite_docx(path, &temp_path, |name, contents| {
-        match (name, &target) {
-            ("docProps/core.xml", DocPropsTarget::Core) => {
-                let updates = [(xml_tag, value); 1];
-                apply_xml_updates(contents, &updates, core_field_spec)
-            }
-            ("docProps/app.xml", DocPropsTarget::App) => {
-                let updates = [(xml_tag, value); 1];
-                apply_xml_updates(contents, &updates, app_field_spec)
-            }
-            _ => Ok((contents, false)),
+    let changed = rewrite_docx(path, &temp_path, |name, contents| match (name, &target) {
+        ("docProps/core.xml", DocPropsTarget::Core) => {
+            let updates = [(xml_tag, value); 1];
+            apply_xml_updates(contents, &updates, core_field_spec)
         }
+        ("docProps/app.xml", DocPropsTarget::App) => {
+            let updates = [(xml_tag, value); 1];
+            apply_xml_updates(contents, &updates, app_field_spec)
+        }
+        _ => Ok((contents, false)),
     })?;
 
     if !changed {

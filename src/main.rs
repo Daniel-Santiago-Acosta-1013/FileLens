@@ -24,6 +24,7 @@ fn main() {
     loop {
         term.clear_screen().ok();
         ui::render_header();
+        ui::render_file_input_hint();
 
         print!("{}", style("│ Nombre del archivo ▸ ").cyan());
         io::stdout().flush().unwrap();

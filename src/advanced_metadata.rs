@@ -21,7 +21,11 @@ pub fn extract_image_metadata(path: &Path) -> bool {
 
     // Información de la cámara
     if let Some(field) = exif.get_field(exif::Tag::Make, exif::In::PRIMARY) {
-        print_exif_property("Fabricante", &field.display_value().to_string(), Color::White);
+        print_exif_property(
+            "Fabricante",
+            &field.display_value().to_string(),
+            Color::White,
+        );
         has_data = true;
     }
 
@@ -38,7 +42,11 @@ pub fn extract_image_metadata(path: &Path) -> bool {
 
     // Fecha y hora
     if let Some(field) = exif.get_field(exif::Tag::DateTime, exif::In::PRIMARY) {
-        print_exif_property("Fecha/Hora", &field.display_value().to_string(), Color::White);
+        print_exif_property(
+            "Fecha/Hora",
+            &field.display_value().to_string(),
+            Color::White,
+        );
         has_data = true;
     }
 
@@ -49,7 +57,11 @@ pub fn extract_image_metadata(path: &Path) -> bool {
     }
 
     if let Some(field) = exif.get_field(exif::Tag::ExposureTime, exif::In::PRIMARY) {
-        print_exif_property("Exposición", &field.display_value().to_string(), Color::White);
+        print_exif_property(
+            "Exposición",
+            &field.display_value().to_string(),
+            Color::White,
+        );
         has_data = true;
     }
 
@@ -59,7 +71,11 @@ pub fn extract_image_metadata(path: &Path) -> bool {
     }
 
     if let Some(field) = exif.get_field(exif::Tag::FocalLength, exif::In::PRIMARY) {
-        print_exif_property("Distancia focal", &field.display_value().to_string(), Color::White);
+        print_exif_property(
+            "Distancia focal",
+            &field.display_value().to_string(),
+            Color::White,
+        );
         has_data = true;
     }
 
@@ -97,7 +113,11 @@ pub fn extract_image_metadata(path: &Path) -> bool {
 
     // Orientación
     if let Some(field) = exif.get_field(exif::Tag::Orientation, exif::In::PRIMARY) {
-        print_exif_property("Orientación", &field.display_value().to_string(), Color::White);
+        print_exif_property(
+            "Orientación",
+            &field.display_value().to_string(),
+            Color::White,
+        );
         has_data = true;
     }
 
@@ -124,7 +144,11 @@ pub fn extract_image_metadata(path: &Path) -> bool {
 
     // Copyright
     if let Some(field) = exif.get_field(exif::Tag::Copyright, exif::In::PRIMARY) {
-        print_exif_property("Copyright", &field.display_value().to_string(), Color::White);
+        print_exif_property(
+            "Copyright",
+            &field.display_value().to_string(),
+            Color::White,
+        );
         has_data = true;
     }
 
@@ -162,7 +186,11 @@ pub fn extract_office_metadata(path: &Path) -> bool {
             }
 
             if let Some(last_modified_by) = extract_xml_tag(&contents, "cp:lastModifiedBy") {
-                print_exif_property("⚠  Última modificación por", &last_modified_by, Color::Yellow);
+                print_exif_property(
+                    "⚠  Última modificación por",
+                    &last_modified_by,
+                    Color::Yellow,
+                );
                 has_data = true;
             }
 
