@@ -1,3 +1,4 @@
+mod advanced_metadata;
 mod directory;
 mod formatting;
 mod metadata;

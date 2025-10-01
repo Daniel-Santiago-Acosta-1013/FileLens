@@ -30,7 +30,7 @@ pub fn find_files(filename: &str) -> Vec<PathBuf> {
         let path_name = search_path
             .replace(&home_dir, "~")
             .split('/')
-            .last()
+            .next_back()
             .unwrap_or("")
             .to_string();
         spinner.set_message(
