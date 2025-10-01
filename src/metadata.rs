@@ -2,7 +2,6 @@ use crate::directory::{EntryKind, count_directory_entries};
 use crate::formatting::{format_optional_time, format_size};
 use crate::ui::{base_table, header_cell, label_cell};
 use comfy_table::{Cell, Color, Row};
-use console::style;
 use infer::Infer;
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, Metadata};
@@ -71,15 +70,15 @@ pub fn render_metadata(path: &Path) -> Result<(), String> {
         Color::White,
     ));
 
-    if matches!(kind, EntryKind::Directory) {
-        if let Ok((count, truncated)) = count_directory_entries(path) {
-            let label = if truncated {
-                format!("{count}+ elementos directos")
-            } else {
-                format!("{count} elementos directos")
-            };
-            table.add_row(property_row("CONT", "Contenido", label, Color::White));
-        }
+    if matches!(kind, EntryKind::Directory)
+        && let Ok((count, truncated)) = count_directory_entries(path)
+    {
+        let label = if truncated {
+            format!("{count}+ elementos directos")
+        } else {
+            format!("{count} elementos directos")
+        };
+        table.add_row(property_row("CONT", "Contenido", label, Color::White));
     }
 
     let readonly_color = if metadata.permissions().readonly() {
@@ -168,7 +167,6 @@ pub fn render_metadata(path: &Path) -> Result<(), String> {
     }
 
     println!("\n{table}");
-    println!("{}", style("Consulta completada.").dim());
     Ok(())
 }
 
