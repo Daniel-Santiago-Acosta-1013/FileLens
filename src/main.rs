@@ -135,9 +135,10 @@ fn show_metadata(path: &Path) {
     let response = response.trim().to_lowercase();
 
     if matches!(response.as_str(), "s" | "si" | "y" | "yes")
-        && let Err(error) = metadata_editor::show_edit_menu(path) {
-            println!("\n{}", style(format!("│ Error: {}", error)).red());
-        }
+        && let Err(error) = metadata_editor::show_edit_menu(path)
+    {
+        println!("\n{}", style(format!("│ Error: {}", error)).red());
+    }
 }
 
 fn ask_continue() -> bool {
