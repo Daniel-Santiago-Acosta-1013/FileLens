@@ -428,14 +428,14 @@ fn is_xml_metadata_clean(
     expected_values: &[(&str, &str)],
     lookup: fn(&str) -> Option<FieldSpec<'static>>,
 ) -> Result<bool, String> {
-    let root = Element::parse(Cursor::new(&contents[..]))
+    let root = Element::parse(Cursor::new(contents))
         .map_err(|e| format!("Error leyendo XML de metadata durante la verificación: {}", e))?;
 
     for &(tag, expected) in expected_values {
-        if let Some(spec) = lookup(tag) {
-            if !element_matches_expected_value(&root, spec, expected) {
-                return Ok(false);
-            }
+        if let Some(spec) = lookup(tag)
+            && !element_matches_expected_value(&root, spec, expected)
+        {
+            return Ok(false);
         }
     }
 
@@ -447,7 +447,7 @@ fn is_custom_metadata_clean(contents: &[u8]) -> Result<bool, String> {
         return Ok(true);
     }
 
-    let root = Element::parse(Cursor::new(&contents[..]))
+    let root = Element::parse(Cursor::new(contents))
         .map_err(|e| format!("Error leyendo custom.xml durante la verificación: {}", e))?;
 
     let has_property_elements = root.children.iter().any(|node| matches!(node, XMLNode::Element(_)));
@@ -468,15 +468,15 @@ fn element_matches_expected_value(
     expected: &str,
 ) -> bool {
     for node in root.children.iter() {
-        if let XMLNode::Element(child) = node {
-            if element_matches(child, &spec) {
-                let content = element_text_content(child);
-                return if expected.is_empty() {
-                    content.is_empty()
-                } else {
-                    content == expected
-                };
-            }
+        if let XMLNode::Element(child) = node
+            && element_matches(child, &spec)
+        {
+            let content = element_text_content(child);
+            return if expected.is_empty() {
+                content.is_empty()
+            } else {
+                content == expected
+            };
         }
     }
 
@@ -628,10 +628,10 @@ fn app_field_spec(tag: &str) -> Option<FieldSpec<'static>> {
 
 fn apply_update_to_element(root: &mut Element, spec: FieldSpec<'_>, new_value: &str) -> bool {
     for node in root.children.iter_mut() {
-        if let XMLNode::Element(child) = node {
-            if element_matches(child, &spec) {
-                return set_element_text(child, new_value);
-            }
+        if let XMLNode::Element(child) = node
+            && element_matches(child, &spec)
+        {
+            return set_element_text(child, new_value);
         }
     }
 
@@ -869,14 +869,14 @@ mod tests {
 
         remove_office_metadata(&source)?;
 
-        let cleaned = dir.path().join("sample_sin_metadata.docx");
-        assert!(cleaned.exists());
+        // Ahora verifica el archivo original que fue modificado in-place
+        assert!(source.exists());
         assert!(
-            verify_office_metadata_clean(&cleaned)
+            verify_office_metadata_clean(&source)
                 .expect("la verificación del documento limpio falló")
         );
 
-        let mut archive = ZipArchive::new(File::open(&cleaned)?)?;
+        let mut archive = ZipArchive::new(File::open(&source)?)?;
 
         let mut core_contents = String::new();
         archive
@@ -913,10 +913,10 @@ mod tests {
 
         remove_image_metadata(&source)?;
 
-        let cleaned = dir.path().join("sample_sin_metadata.png");
-        assert!(cleaned.exists());
+        // Ahora verifica el archivo original que fue modificado in-place
+        assert!(source.exists());
         assert!(
-            verify_image_metadata_clean(&cleaned)
+            verify_image_metadata_clean(&source)
                 .expect("la verificacion de la imagen limpia fallo"),
             "la imagen generada deberia quedar sin metadata detectable"
         );
@@ -943,10 +943,12 @@ mod tests {
         let source = dir.path().join("sample.docx");
         create_sample_docx(&source)?;
 
-        let updated_path = apply_office_metadata_edit(&source, "dc:creator", "Nuevo Autor")?;
-        assert!(updated_path.exists());
+        apply_office_metadata_edit(&source, "dc:creator", "Nuevo Autor")
+            .map_err(|e| Box::<dyn std::error::Error>::from(e.to_string()))?;
 
-        let mut archive = ZipArchive::new(File::open(&updated_path)?)?;
+        assert!(source.exists());
+
+        let mut archive = ZipArchive::new(File::open(&source)?)?;
         let mut core_contents = String::new();
         archive
             .by_name("docProps/core.xml")?
