@@ -37,35 +37,35 @@ pub fn extract_office_metadata(path: &Path) -> AdvancedMetadataResult {
 
     if let Ok(mut core_file) = archive.by_name("docProps/core.xml") {
         let mut contents = String::new();
-        if core_file.read_to_string(&mut contents).is_ok() {
-            if let Some(root) = parse_xml(&contents) {
-                has_entries |= extract_core_properties(&root, &mut section, &mut risks);
-            }
+        if core_file.read_to_string(&mut contents).is_ok()
+            && let Some(root) = parse_xml(&contents)
+        {
+            has_entries |= extract_core_properties(&root, &mut section, &mut risks);
         }
     }
 
     if let Ok(mut app_file) = archive.by_name("docProps/app.xml") {
         let mut contents = String::new();
-        if app_file.read_to_string(&mut contents).is_ok() {
-            if let Some(root) = parse_xml(&contents) {
-                has_entries |= extract_app_properties(&root, &mut section, &mut risks);
-            }
+        if app_file.read_to_string(&mut contents).is_ok()
+            && let Some(root) = parse_xml(&contents)
+        {
+            has_entries |= extract_app_properties(&root, &mut section, &mut risks);
         }
     }
 
     if let Ok(mut custom_file) = archive.by_name("docProps/custom.xml") {
         let mut contents = String::new();
-        if custom_file.read_to_string(&mut contents).is_ok() {
-            if let Some(root) = parse_xml(&contents) {
-                let custom_props = extract_custom_properties(&root);
-                if !custom_props.is_empty() {
-                    for (name, value) in custom_props {
-                        let label = format!("Propiedad personalizada · {}", name);
-                        section.entries.push(ReportEntry::warning(&label, &value));
-                        risks.push(ReportEntry::warning(label, value));
-                    }
-                    has_entries = true;
+        if custom_file.read_to_string(&mut contents).is_ok()
+            && let Some(root) = parse_xml(&contents)
+        {
+            let custom_props = extract_custom_properties(&root);
+            if !custom_props.is_empty() {
+                for (name, value) in custom_props {
+                    let label = format!("Propiedad personalizada · {}", name);
+                    section.entries.push(ReportEntry::warning(&label, &value));
+                    risks.push(ReportEntry::warning(label, value));
                 }
+                has_entries = true;
             }
         }
     }
@@ -254,10 +254,11 @@ fn extract_fields(
 
 fn find_child_text(root: &Element, local_name: &str, namespace: Option<&str>) -> Option<String> {
     for node in &root.children {
-        if let XMLNode::Element(child) = node {
-            if child.name == local_name && namespace_matches(child, namespace) {
-                return Some(element_text_content(child));
-            }
+        if let XMLNode::Element(child) = node
+            && child.name == local_name
+            && namespace_matches(child, namespace)
+        {
+            return Some(element_text_content(child));
         }
     }
     None

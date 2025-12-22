@@ -92,6 +92,12 @@ impl MetadataReport {
     }
 }
 
+impl Default for MetadataReport {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct MetadataOptions {
     pub include_hash: bool,
