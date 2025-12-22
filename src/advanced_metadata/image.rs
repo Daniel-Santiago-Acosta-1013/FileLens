@@ -1,162 +1,173 @@
-//! Extracción de metadata EXIF relevante para imágenes.
+//! Extracción de metadata de imágenes (EXIF + detección XMP/IPTC).
 
-use comfy_table::Color;
-use console::style;
+use crate::advanced_metadata::AdvancedMetadataResult;
+use crate::metadata::report::{EntryLevel, ReportEntry, ReportSection, SectionNotice};
+use exif::Tag;
 use std::fs::File;
-use std::io::BufReader;
+use std::io::{BufReader, Read};
 use std::path::Path;
 
-/// Imprime la metadata EXIF detectada y devuelve si se encontró información.
-pub fn extract_image_metadata(path: &Path) -> bool {
+const SIDECAR_SCAN_LIMIT: u64 = 2 * 1024 * 1024; // 2 MiB
+
+pub fn extract_image_metadata(path: &Path) -> AdvancedMetadataResult {
+    let mut section = ReportSection::new("Metadata de imagen");
+    let mut risks = Vec::new();
+
     let file = match File::open(path) {
-        Ok(f) => f,
-        Err(_) => return false,
+        Ok(file) => file,
+        Err(_) => {
+            section.notice = Some(SectionNotice::new(
+                "No se pudo leer metadata de esta imagen",
+                EntryLevel::Warning,
+            ));
+            return AdvancedMetadataResult { section, risks };
+        }
     };
+
+    let mut has_entries = false;
+
     let mut bufreader = BufReader::new(&file);
     let exif_reader = exif::Reader::new();
-    let exif = match exif_reader.read_from_container(&mut bufreader) {
-        Ok(e) => e,
-        Err(_) => return false,
-    };
+    let exif = exif_reader.read_from_container(&mut bufreader).ok();
 
-    let mut has_data = false;
-    println!();
+    if let Some(exif) = exif {
+        has_entries |= push_exif_value(&mut section, &exif, Tag::Make, "Fabricante");
+        has_entries |= push_exif_value(&mut section, &exif, Tag::Model, "Modelo");
+        has_entries |= push_exif_value(&mut section, &exif, Tag::Software, "Software");
+        has_entries |= push_exif_value(&mut section, &exif, Tag::DateTime, "Fecha/Hora");
+        has_entries |= push_exif_value(&mut section, &exif, Tag::FNumber, "Apertura");
+        has_entries |= push_exif_value(&mut section, &exif, Tag::ExposureTime, "Exposición");
+        has_entries |= push_exif_value(&mut section, &exif, Tag::PhotographicSensitivity, "ISO");
+        has_entries |= push_exif_value(&mut section, &exif, Tag::FocalLength, "Distancia focal");
+        has_entries |= push_exif_value(&mut section, &exif, Tag::Orientation, "Orientación");
+        has_entries |= push_exif_value(&mut section, &exif, Tag::PixelXDimension, "Ancho");
+        has_entries |= push_exif_value(&mut section, &exif, Tag::PixelYDimension, "Alto");
+        has_entries |= push_exif_value(&mut section, &exif, Tag::Copyright, "Copyright");
 
-    if let Some(field) = exif.get_field(exif::Tag::Make, exif::In::PRIMARY) {
-        print_exif_property(
-            "Fabricante",
-            &field.display_value().to_string(),
-            Color::White,
-        );
-        has_data = true;
+        if let Some(field) = exif.get_field(Tag::GPSLatitude, exif::In::PRIMARY)
+            && let Some(ref_field) = exif.get_field(Tag::GPSLatitudeRef, exif::In::PRIMARY)
+        {
+            let value = format!("{} {}", field.display_value(), ref_field.display_value());
+            section.entries.push(ReportEntry::warning("GPS Latitud", &value));
+            risks.push(ReportEntry::warning("GPS Latitud", value));
+            has_entries = true;
+        }
+
+        if let Some(field) = exif.get_field(Tag::GPSLongitude, exif::In::PRIMARY)
+            && let Some(ref_field) = exif.get_field(Tag::GPSLongitudeRef, exif::In::PRIMARY)
+        {
+            let value = format!("{} {}", field.display_value(), ref_field.display_value());
+            section.entries.push(ReportEntry::warning("GPS Longitud", &value));
+            risks.push(ReportEntry::warning("GPS Longitud", value));
+            has_entries = true;
+        }
+
+        if let Some(field) = exif.get_field(Tag::GPSAltitude, exif::In::PRIMARY) {
+            let value = field.display_value().to_string();
+            section
+                .entries
+                .push(ReportEntry::warning("GPS Altitud", &value));
+            risks.push(ReportEntry::warning("GPS Altitud", value));
+            has_entries = true;
+        }
+
+        if let Some(field) = exif.get_field(Tag::Artist, exif::In::PRIMARY) {
+            let value = field.display_value().to_string();
+            section.entries.push(ReportEntry::warning("Artista", &value));
+            risks.push(ReportEntry::warning("Artista", value));
+            has_entries = true;
+        }
     }
 
-    if let Some(field) = exif.get_field(exif::Tag::Model, exif::In::PRIMARY) {
-        print_exif_property("Modelo", &field.display_value().to_string(), Color::White);
-        has_data = true;
+    let sidecar = detect_xmp_iptc(path);
+    if sidecar.xmp {
+        section
+            .entries
+            .push(ReportEntry::warning("XMP", "Detectado"));
+        risks.push(ReportEntry::warning(
+            "XMP embebido",
+            "Puede contener metadata adicional",
+        ));
+        has_entries = true;
+    }
+    if sidecar.iptc {
+        section
+            .entries
+            .push(ReportEntry::warning("IPTC", "Detectado"));
+        risks.push(ReportEntry::warning(
+            "IPTC embebido",
+            "Puede contener metadata adicional",
+        ));
+        has_entries = true;
     }
 
-    if let Some(field) = exif.get_field(exif::Tag::Software, exif::In::PRIMARY) {
-        print_exif_property("Software", &field.display_value().to_string(), Color::White);
-        has_data = true;
+    if !has_entries {
+        section.notice = Some(SectionNotice::new(
+            "No se encontró metadata EXIF/XMP/IPTC en esta imagen",
+            EntryLevel::Muted,
+        ));
+    } else if !risks.is_empty() {
+        section.notice = Some(SectionNotice::new(
+            "⚠  Esta imagen contiene metadata que puede revelar información sensible",
+            EntryLevel::Warning,
+        ));
     }
 
-    if let Some(field) = exif.get_field(exif::Tag::DateTime, exif::In::PRIMARY) {
-        print_exif_property(
-            "Fecha/Hora",
-            &field.display_value().to_string(),
-            Color::White,
-        );
-        has_data = true;
-    }
-
-    if let Some(field) = exif.get_field(exif::Tag::FNumber, exif::In::PRIMARY) {
-        print_exif_property("Apertura", &field.display_value().to_string(), Color::White);
-        has_data = true;
-    }
-
-    if let Some(field) = exif.get_field(exif::Tag::ExposureTime, exif::In::PRIMARY) {
-        print_exif_property(
-            "Exposición",
-            &field.display_value().to_string(),
-            Color::White,
-        );
-        has_data = true;
-    }
-
-    if let Some(field) = exif.get_field(exif::Tag::PhotographicSensitivity, exif::In::PRIMARY) {
-        print_exif_property("ISO", &field.display_value().to_string(), Color::White);
-        has_data = true;
-    }
-
-    if let Some(field) = exif.get_field(exif::Tag::FocalLength, exif::In::PRIMARY) {
-        print_exif_property(
-            "Distancia focal",
-            &field.display_value().to_string(),
-            Color::White,
-        );
-        has_data = true;
-    }
-
-    if let Some(lat) = exif.get_field(exif::Tag::GPSLatitude, exif::In::PRIMARY)
-        && let Some(lat_ref) = exif.get_field(exif::Tag::GPSLatitudeRef, exif::In::PRIMARY)
-    {
-        print_exif_property(
-            "⚠  GPS Latitud",
-            &format!("{} {}", lat.display_value(), lat_ref.display_value()),
-            Color::Yellow,
-        );
-        has_data = true;
-    }
-
-    if let Some(lon) = exif.get_field(exif::Tag::GPSLongitude, exif::In::PRIMARY)
-        && let Some(lon_ref) = exif.get_field(exif::Tag::GPSLongitudeRef, exif::In::PRIMARY)
-    {
-        print_exif_property(
-            "⚠  GPS Longitud",
-            &format!("{} {}", lon.display_value(), lon_ref.display_value()),
-            Color::Yellow,
-        );
-        has_data = true;
-    }
-
-    if let Some(field) = exif.get_field(exif::Tag::GPSAltitude, exif::In::PRIMARY) {
-        print_exif_property(
-            "⚠  GPS Altitud",
-            &field.display_value().to_string(),
-            Color::Yellow,
-        );
-        has_data = true;
-    }
-
-    if let Some(field) = exif.get_field(exif::Tag::Orientation, exif::In::PRIMARY) {
-        print_exif_property(
-            "Orientación",
-            &field.display_value().to_string(),
-            Color::White,
-        );
-        has_data = true;
-    }
-
-    if let Some(field) = exif.get_field(exif::Tag::PixelXDimension, exif::In::PRIMARY) {
-        print_exif_property("Ancho", &field.display_value().to_string(), Color::White);
-        has_data = true;
-    }
-
-    if let Some(field) = exif.get_field(exif::Tag::PixelYDimension, exif::In::PRIMARY) {
-        print_exif_property("Alto", &field.display_value().to_string(), Color::White);
-        has_data = true;
-    }
-
-    if let Some(field) = exif.get_field(exif::Tag::Artist, exif::In::PRIMARY) {
-        print_exif_property(
-            "⚠  Artista",
-            &field.display_value().to_string(),
-            Color::Yellow,
-        );
-        has_data = true;
-    }
-
-    if let Some(field) = exif.get_field(exif::Tag::Copyright, exif::In::PRIMARY) {
-        print_exif_property(
-            "Copyright",
-            &field.display_value().to_string(),
-            Color::White,
-        );
-        has_data = true;
-    }
-
-    has_data
+    AdvancedMetadataResult { section, risks }
 }
 
-fn print_exif_property(label: &str, value: &str, color: Color) {
-    let label_styled = style(format!("    {}", label)).cyan().bold();
-    let arrow = style("→").dim();
-    let value_styled = match color {
-        Color::Yellow => style(value).yellow(),
-        Color::Green => style(value).green(),
-        Color::Red => style(value).red(),
-        _ => style(value).white(),
+fn push_exif_value(section: &mut ReportSection, exif: &exif::Exif, tag: Tag, label: &str) -> bool {
+    if let Some(field) = exif.get_field(tag, exif::In::PRIMARY) {
+        section.entries.push(ReportEntry::info(
+            label,
+            field.display_value().to_string(),
+        ));
+        return true;
+    }
+    false
+}
+
+struct SidecarDetection {
+    xmp: bool,
+    iptc: bool,
+}
+
+fn detect_xmp_iptc(path: &Path) -> SidecarDetection {
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(_) => {
+            return SidecarDetection {
+                xmp: false,
+                iptc: false,
+            }
+        }
     };
-    println!("{} {} {}", label_styled, arrow, value_styled);
+
+    let mut buffer = Vec::new();
+    if file
+        .take(SIDECAR_SCAN_LIMIT)
+        .read_to_end(&mut buffer)
+        .is_err()
+    {
+        return SidecarDetection {
+            xmp: false,
+            iptc: false,
+        };
+    }
+
+    let xmp = contains_bytes(&buffer, b"<x:xmpmeta")
+        || contains_bytes(&buffer, b"<?xpacket")
+        || contains_bytes(&buffer, b"http://ns.adobe.com/xap/1.0/");
+
+    let iptc = contains_bytes(&buffer, b"Photoshop 3.0")
+        && contains_bytes(&buffer, b"8BIM")
+        && contains_bytes(&buffer, b"IPTC");
+
+    SidecarDetection { xmp, iptc }
+}
+
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
 }

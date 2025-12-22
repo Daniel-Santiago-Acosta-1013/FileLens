@@ -4,6 +4,13 @@ mod image;
 mod office;
 mod pdf;
 
+use crate::metadata::report::{ReportEntry, ReportSection};
+
+pub struct AdvancedMetadataResult {
+    pub section: ReportSection,
+    pub risks: Vec<ReportEntry>,
+}
+
 pub use image::extract_image_metadata;
 pub use office::extract_office_metadata;
 pub use pdf::extract_pdf_metadata;

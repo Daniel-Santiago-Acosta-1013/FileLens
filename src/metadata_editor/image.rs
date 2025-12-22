@@ -1,6 +1,5 @@
 //! Operaciones relacionadas con metadata EXIF de imágenes.
 
-use console::style;
 use std::fs::{self, File};
 use std::io::BufReader;
 use std::path::Path;
@@ -10,8 +9,6 @@ use crate::metadata_editor::utils::generate_temp_filename;
 /// Elimina la metadata EXIF de una imagen manteniendo la información visual.
 pub fn remove_image_metadata(path: &Path) -> Result<(), String> {
     use image::ImageReader;
-
-    println!("\n{}", style("│ Eliminando metadata de imagen...").dim());
 
     let img = ImageReader::open(path)
         .map_err(|e| format!("No se pudo abrir la imagen: {}", e))?
@@ -28,17 +25,6 @@ pub fn remove_image_metadata(path: &Path) -> Result<(), String> {
     if !metadata_clean {
         let _ = fs::remove_file(&temp_path);
 
-        println!("\n{}", style("┌─ Verificación de metadata fallida ─").red());
-        println!(
-            "{}",
-            style("│ No se pudo confirmar la limpieza del archivo.").red()
-        );
-        println!(
-            "{}",
-            style("│ La metadata original podría seguir presente.").red()
-        );
-        println!("{}", style("└─").red());
-
         return Err(
             "La verificación indicó que la metadata no se eliminó correctamente".to_string(),
         );
@@ -48,22 +34,6 @@ pub fn remove_image_metadata(path: &Path) -> Result<(), String> {
         let _ = fs::remove_file(&temp_path);
         format!("No se pudo reemplazar el archivo original: {}", e)
     })?;
-
-    println!(
-        "\n{}",
-        style("┌─ Metadata Eliminada Exitosamente ─").green()
-    );
-    println!(
-        "{}",
-        style(format!("│ Archivo: {}", path.display()))
-            .green()
-            .bold()
-    );
-    println!(
-        "{}",
-        style("│ La metadata ha sido eliminada del archivo original.").green()
-    );
-    println!("{}", style("└─").green());
 
     Ok(())
 }

@@ -2,8 +2,6 @@
 
 mod hashing;
 mod mime;
-mod output;
 mod permissions;
-mod renderer;
-
-pub use renderer::render_metadata;
+pub mod report;
+pub mod renderer;
