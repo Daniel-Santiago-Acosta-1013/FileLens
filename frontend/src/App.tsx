@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-type ViewId = "home" | "analyze" | "clean" | "report" | "edit";
+type ViewId = "analyze" | "clean";
 
 type EntryLevel = "Info" | "Warning" | "Success" | "Error" | "Muted";
 
@@ -68,12 +68,9 @@ type Filter = "all" | "images" | "office";
 
 type OfficeField = "author" | "title" | "subject" | "company";
 
-const NAV_ITEMS: { id: ViewId; label: string; hint: string }[] = [
-  { id: "home", label: "Inicio", hint: "Resumen general" },
-  { id: "analyze", label: "Analisis", hint: "Archivo individual" },
-  { id: "clean", label: "Limpieza", hint: "Directorios" },
-  { id: "report", label: "Reporte", hint: "Detalles" },
-  { id: "edit", label: "Edicion", hint: "Metadata" }
+const NAV_ITEMS: { id: ViewId; label: string }[] = [
+  { id: "analyze", label: "Analisis" },
+  { id: "clean", label: "Limpieza" }
 ];
 
 const CLEANUP_EMPTY: CleanupState = {
@@ -87,71 +84,123 @@ const CLEANUP_EMPTY: CleanupState = {
   finished: false
 };
 
-function levelClass(level: EntryLevel) {
-  switch (level) {
-    case "Success":
-      return "pill success";
-    case "Warning":
-      return "pill warning";
-    case "Error":
-      return "pill error";
-    case "Muted":
-      return "pill muted";
-    default:
-      return "pill info";
+const SYSTEM_ALLOWLIST = new Set([
+  "Tipo",
+  "Tamaño",
+  "Tipo MIME",
+  "Hash SHA-256",
+  "Última modificación",
+  "Fecha de creación"
+]);
+
+const OFFICE_FIELD_LABELS: Record<OfficeField, string> = {
+  author: "Creador",
+  title: "Título",
+  subject: "Asunto",
+  company: "Empresa"
+};
+
+function getEntry(report: MetadataReport | null, label: string) {
+  if (!report) return null;
+  return report.system.find((entry) => entry.label === label) ?? null;
+}
+
+function extractSystem(report: MetadataReport | null) {
+  if (!report) return [] as ReportEntry[];
+  return report.system.filter((entry) => SYSTEM_ALLOWLIST.has(entry.label));
+}
+
+function extractOfficeValue(report: MetadataReport | null, label: string) {
+  if (!report) return "";
+  for (const section of report.internal) {
+    for (const entry of section.entries) {
+      if (entry.label === label) return entry.value;
+    }
   }
+  return "";
 }
 
 function toneClass(level: EntryLevel) {
   switch (level) {
     case "Success":
-      return "success";
+      return "note note--success";
     case "Warning":
-      return "warning";
+      return "note note--warning";
     case "Error":
-      return "error";
+      return "note note--error";
     case "Muted":
-      return "muted";
+      return "note note--muted";
     default:
-      return "info";
+      return "note note--info";
   }
 }
 
 export default function App() {
-  const [view, setView] = useState<ViewId>("home");
+  const [view, setView] = useState<ViewId>("analyze");
   const [filePath, setFilePath] = useState("");
   const [includeHash, setIncludeHash] = useState(true);
   const [report, setReport] = useState<MetadataReport | null>(null);
   const [reportError, setReportError] = useState("");
-  const [fileMatches, setFileMatches] = useState<string[]>([]);
-  const [dirMatches, setDirMatches] = useState<string[]>([]);
+  const [officeValues, setOfficeValues] = useState<Record<OfficeField, string>>({
+    author: "",
+    title: "",
+    subject: "",
+    company: ""
+  });
 
+  const [cleanMode, setCleanMode] = useState<"directory" | "files">("directory");
   const [dirPath, setDirPath] = useState("");
+  const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [recursive, setRecursive] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
   const [dirSummary, setDirSummary] = useState<DirectoryAnalysisSummary | null>(null);
+  const [fileSummary, setFileSummary] = useState<DirectoryAnalysisSummary | null>(null);
   const [cleanup, setCleanup] = useState<CleanupState>(CLEANUP_EMPTY);
-
-  const [editField, setEditField] = useState<OfficeField>("author");
-  const [editValue, setEditValue] = useState("");
 
   const [toast, setToast] = useState<Toast | null>(null);
   const toastTimer = useRef<number | null>(null);
 
   const [busy, setBusy] = useState({
     analyze: false,
-    searchFile: false,
-    searchDir: false,
     dirAnalyze: false,
+    fileAnalyze: false,
     cleanup: false,
     remove: false,
     edit: false
   });
 
+  const systemEntries = useMemo(() => extractSystem(report), [report]);
+  const mimeEntry = useMemo(() => getEntry(report, "Tipo MIME"), [report]);
+  const typeEntry = useMemo(() => getEntry(report, "Tipo"), [report]);
+
   const extensionCounts = useMemo(() => {
-    if (!dirSummary) return [] as [string, number][];
-    return dirSummary.extension_counts.slice(0, 10);
-  }, [dirSummary]);
+    const summary = cleanMode === "directory" ? dirSummary : fileSummary;
+    if (!summary) return [] as [string, number][];
+    return summary.extension_counts.slice(0, 8);
+  }, [cleanMode, dirSummary, fileSummary]);
+
+  const isOffice = useMemo(() => {
+    const extension = filePath.split(".").pop()?.toLowerCase();
+    if (extension && ["docx", "xlsx", "pptx"].includes(extension)) return true;
+    if (mimeEntry?.value) {
+      return (
+        mimeEntry.value.includes("officedocument") ||
+        mimeEntry.value.includes("msword") ||
+        mimeEntry.value.includes("ms-excel") ||
+        mimeEntry.value.includes("ms-powerpoint")
+      );
+    }
+    return false;
+  }, [filePath, mimeEntry]);
+
+  useEffect(() => {
+    setOfficeValues({
+      author: extractOfficeValue(report, OFFICE_FIELD_LABELS.author),
+      title: extractOfficeValue(report, OFFICE_FIELD_LABELS.title),
+      subject: extractOfficeValue(report, OFFICE_FIELD_LABELS.subject),
+      company: extractOfficeValue(report, OFFICE_FIELD_LABELS.company)
+    });
+  }, [report]);
 
   useEffect(() => {
     let stop: (() => void) | null = null;
@@ -216,9 +265,7 @@ export default function App() {
       });
 
     return () => {
-      if (stop) {
-        stop();
-      }
+      if (stop) stop();
     };
   }, []);
 
@@ -227,12 +274,42 @@ export default function App() {
       window.clearTimeout(toastTimer.current);
     }
     setToast({ kind, message });
-    toastTimer.current = window.setTimeout(() => setToast(null), 4200);
+    toastTimer.current = window.setTimeout(() => setToast(null), 3600);
+  };
+
+  const handlePickFile = async () => {
+    const selected = await invoke<string | null>("pick_file");
+    if (selected) {
+      setFilePath(selected);
+      setReport(null);
+      setReportError("");
+      showToast("info", "Archivo seleccionado");
+    }
+  };
+
+  const handlePickDirectory = async () => {
+    const selected = await invoke<string | null>("pick_directory");
+    if (selected) {
+      setDirPath(selected);
+      setDirSummary(null);
+      setCleanup(CLEANUP_EMPTY);
+      showToast("info", "Directorio seleccionado");
+    }
+  };
+
+  const handlePickFiles = async () => {
+    const selected = await invoke<string[] | null>("pick_files");
+    if (selected && selected.length) {
+      setSelectedFiles(selected);
+      setFileSummary(null);
+      setCleanup(CLEANUP_EMPTY);
+      showToast("info", `${selected.length} archivos seleccionados`);
+    }
   };
 
   const handleAnalyze = async () => {
     if (!filePath.trim()) {
-      showToast("warning", "Ingresa una ruta de archivo");
+      showToast("warning", "Selecciona un archivo");
       return;
     }
     setBusy((prev) => ({ ...prev, analyze: true }));
@@ -240,10 +317,9 @@ export default function App() {
     try {
       const result = await invoke<MetadataReport>("analyze_file", {
         path: filePath,
-        include_hash: includeHash
+        includeHash: includeHash
       });
       setReport(result);
-      setView("report");
       showToast("success", "Analisis completado");
     } catch (error) {
       setReportError(String(error));
@@ -253,28 +329,9 @@ export default function App() {
     }
   };
 
-  const handleSearchFiles = async () => {
-    if (!filePath.trim()) {
-      showToast("warning", "Ingresa un nombre para buscar");
-      return;
-    }
-    setBusy((prev) => ({ ...prev, searchFile: true }));
-    try {
-      const matches = await invoke<string[]>("search_files", { query: filePath });
-      setFileMatches(matches);
-      if (!matches.length) {
-        showToast("warning", "No se encontraron coincidencias");
-      }
-    } catch (error) {
-      showToast("error", `Busqueda fallida: ${error}`);
-    } finally {
-      setBusy((prev) => ({ ...prev, searchFile: false }));
-    }
-  };
-
   const handleAnalyzeDirectory = async () => {
     if (!dirPath.trim()) {
-      showToast("warning", "Ingresa la ruta de un directorio");
+      showToast("warning", "Selecciona un directorio");
       return;
     }
     setBusy((prev) => ({ ...prev, dirAnalyze: true }));
@@ -284,7 +341,7 @@ export default function App() {
         recursive
       });
       setDirSummary(summary);
-      showToast("success", "Analisis de directorio completado");
+      showToast("success", "Analisis completado");
     } catch (error) {
       showToast("error", `No se pudo analizar: ${error}`);
     } finally {
@@ -292,36 +349,64 @@ export default function App() {
     }
   };
 
-  const handleSearchDirectories = async () => {
-    if (!dirPath.trim()) {
-      showToast("warning", "Ingresa un nombre para buscar");
+  const handleAnalyzeFiles = async () => {
+    if (!selectedFiles.length) {
+      showToast("warning", "Selecciona archivos");
       return;
     }
-    setBusy((prev) => ({ ...prev, searchDir: true }));
+    setBusy((prev) => ({ ...prev, fileAnalyze: true }));
     try {
-      const matches = await invoke<string[]>("search_directories", { query: dirPath });
-      setDirMatches(matches);
-      if (!matches.length) {
-        showToast("warning", "No se encontraron directorios");
-      }
+      const summary = await invoke<DirectoryAnalysisSummary>("analyze_files", {
+        paths: selectedFiles
+      });
+      setFileSummary(summary);
+      showToast("success", "Analisis completado");
     } catch (error) {
-      showToast("error", `Busqueda fallida: ${error}`);
+      showToast("error", `No se pudo analizar: ${error}`);
     } finally {
-      setBusy((prev) => ({ ...prev, searchDir: false }));
+      setBusy((prev) => ({ ...prev, fileAnalyze: false }));
     }
   };
 
   const handleStartCleanup = async () => {
-    if (!dirPath.trim()) {
-      showToast("warning", "Ingresa la ruta de un directorio");
+    if (cleanMode === "directory") {
+      if (!dirPath.trim()) {
+        showToast("warning", "Selecciona un directorio");
+        return;
+      }
+      if (!dirSummary) {
+        showToast("warning", "Ejecuta el analisis antes de limpiar");
+        return;
+      }
+      setBusy((prev) => ({ ...prev, cleanup: true }));
+      setCleanup(CLEANUP_EMPTY);
+      try {
+        await invoke("start_cleanup", {
+          path: dirPath,
+          recursive,
+          filter
+        });
+        showToast("info", "Limpieza iniciada");
+      } catch (error) {
+        setBusy((prev) => ({ ...prev, cleanup: false }));
+        showToast("error", `No se pudo iniciar la limpieza: ${error}`);
+      }
+      return;
+    }
+
+    if (!selectedFiles.length) {
+      showToast("warning", "Selecciona archivos");
+      return;
+    }
+    if (!fileSummary) {
+      showToast("warning", "Ejecuta el analisis antes de limpiar");
       return;
     }
     setBusy((prev) => ({ ...prev, cleanup: true }));
     setCleanup(CLEANUP_EMPTY);
     try {
-      await invoke("start_cleanup", {
-        path: dirPath,
-        recursive,
+      await invoke("start_cleanup_files", {
+        paths: selectedFiles,
         filter
       });
       showToast("info", "Limpieza iniciada");
@@ -333,7 +418,11 @@ export default function App() {
 
   const handleRemoveMetadata = async () => {
     if (!filePath.trim()) {
-      showToast("warning", "Ingresa la ruta de un archivo");
+      showToast("warning", "Selecciona un archivo");
+      return;
+    }
+    if (!report) {
+      showToast("warning", "Analiza el archivo antes de limpiar metadata");
       return;
     }
     setBusy((prev) => ({ ...prev, remove: true }));
@@ -347,21 +436,26 @@ export default function App() {
     }
   };
 
-  const handleEditMetadata = async () => {
+  const handleEditField = async (field: OfficeField) => {
     if (!filePath.trim()) {
-      showToast("warning", "Ingresa la ruta de un archivo");
+      showToast("warning", "Selecciona un archivo");
       return;
     }
-    if (!editValue.trim()) {
-      showToast("warning", "Ingresa un nuevo valor");
+    if (!report) {
+      showToast("warning", "Analiza el archivo antes de editar");
+      return;
+    }
+    const value = officeValues[field]?.trim();
+    if (!value) {
+      showToast("warning", "Ingresa un valor valido");
       return;
     }
     setBusy((prev) => ({ ...prev, edit: true }));
     try {
       await invoke("edit_office_metadata", {
         path: filePath,
-        field: editField,
-        value: editValue
+        field,
+        value
       });
       showToast("success", "Metadata actualizada");
     } catch (error) {
@@ -373,12 +467,12 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <aside className="side">
+      <aside className="sidebar">
         <div className="brand">
-          <span className="brand-mark">FL</span>
+          <div className="brand-mark">FL</div>
           <div>
-            <h1>FileLens</h1>
-            <p>Studio UI</p>
+            <strong>FileLens</strong>
+            <span>Desktop</span>
           </div>
         </div>
         <nav className="nav">
@@ -388,86 +482,36 @@ export default function App() {
               className={`nav-btn ${view === item.id ? "active" : ""}`}
               onClick={() => setView(item.id)}
             >
-              <span>{item.label}</span>
-              <small>{item.hint}</small>
+              {item.label}
             </button>
           ))}
         </nav>
-        <div className="side-card">
-          <h3>Estado rapido</h3>
-          <p>Reporte: {report ? "listo" : "sin datos"}</p>
-          <p>Limpieza: {cleanup.running ? "en progreso" : "detenida"}</p>
-          <p>Directorio: {dirSummary ? `${dirSummary.total_files} archivos` : "sin analisis"}</p>
+        <div className="sidebar-footer">
+          <span className="status-dot" />
+          <span>{cleanup.running ? "Procesando" : "Listo"}</span>
         </div>
       </aside>
 
       <main className="main">
-        <header className="hero">
+        <header className="topbar">
           <div>
-            <p className="kicker">FileLens Desktop</p>
-            <h2>Control total de metadata, sin perder detalle</h2>
-            <p className="subtitle">
-              Analiza archivos, limpia directorios y edita propiedades sensibles con una vista clara y moderna.
-            </p>
-          </div>
-          <div className="hero-stats">
-            <div>
-              <span className="stat-label">Modo</span>
-              <strong>{view.toUpperCase()}</strong>
-            </div>
-            <div>
-              <span className="stat-label">Hash</span>
-              <strong>{includeHash ? "ON" : "OFF"}</strong>
-            </div>
+            <h1>{NAV_ITEMS.find((item) => item.id === view)?.label}</h1>
+            <p>Flujo principal</p>
           </div>
         </header>
 
         <section className="content">
-          {view === "home" && (
-            <div className="grid">
-              <div className="card tall">
-                <h3>Flujo sugerido</h3>
-                <ol className="steps">
-                  <li>Define la ruta del archivo o directorio.</li>
-                  <li>Ejecuta el analisis para obtener contexto.</li>
-                  <li>Revisa el reporte o limpia en bloque.</li>
-                  <li>Si es Office, ajusta campos clave.</li>
-                </ol>
-                <div className="cta-row">
-                  <button className="primary" onClick={() => setView("analyze")}>Analizar archivo</button>
-                  <button className="ghost" onClick={() => setView("clean")}>Limpieza masiva</button>
-                </div>
-              </div>
-              <div className="card">
-                <h3>Checklist rapido</h3>
-                <ul className="checklist">
-                  <li>Soporte para imagenes y Office</li>
-                  <li>Reporte con riesgos destacados</li>
-                  <li>Limpieza con progreso detallado</li>
-                  <li>Edicion puntual de campos Office</li>
-                </ul>
-              </div>
-              <div className="card">
-                <h3>Ultimo archivo</h3>
-                <p>{filePath ? filePath : "Aun no has definido una ruta"}</p>
-                <button className="ghost" onClick={() => setView("report")}>Ver reporte</button>
-              </div>
-            </div>
-          )}
-
           {view === "analyze" && (
-            <div className="grid two">
-              <div className="card">
-                <h3>Analisis de archivo</h3>
-                <label className="field">
-                  <span>Ruta del archivo</span>
-                  <input
-                    value={filePath}
-                    onChange={(event) => setFilePath(event.target.value)}
-                    placeholder="/Users/tu/archivo.pdf"
-                  />
-                </label>
-                <div className="row">
+            <div className="sheet">
+              <div className="section">
+                <div className="section-row">
+                  <div>
+                    <span className="label">Archivo</span>
+                    <div className="path-box">{filePath || "Ningun archivo seleccionado"}</div>
+                  </div>
+                  <button className="secondary" onClick={handlePickFile}>Explorar</button>
+                </div>
+                <div className="section-row">
                   <label className="toggle">
                     <input
                       type="checkbox"
@@ -476,116 +520,246 @@ export default function App() {
                     />
                     <span>Calcular hash SHA-256</span>
                   </label>
-                  <button className="ghost" onClick={handleSearchFiles} disabled={busy.searchFile}>
-                    Buscar coincidencias
-                  </button>
-                </div>
-                <div className="cta-row">
                   <button className="primary" onClick={handleAnalyze} disabled={busy.analyze}>
                     {busy.analyze ? "Analizando..." : "Analizar"}
-                  </button>
-                  <button className="ghost" onClick={() => setView("report")}>
-                    Ir al reporte
                   </button>
                 </div>
                 {reportError && <p className="inline-error">{reportError}</p>}
               </div>
-              <div className="card">
-                <h3>Coincidencias recientes</h3>
-                {fileMatches.length === 0 && <p>Sin resultados aun.</p>}
-                <div className="match-list">
-                  {fileMatches.map((match) => (
-                    <button
-                      key={match}
-                      className="match"
-                      onClick={() => {
-                        setFilePath(match);
-                        showToast("info", "Ruta seleccionada");
-                      }}
-                    >
-                      {match}
-                    </button>
-                  ))}
+
+              <div className="section">
+                <span className="label">Tipo detectado</span>
+                <div className="meta-inline">
+                  <span>{typeEntry?.value || "Archivo"}</span>
+                  <span>{filePath.split(".").pop()?.toUpperCase() || "-"}</span>
+                  <span className="muted">{mimeEntry?.value || "MIME no disponible"}</span>
+                  <span className="muted">{getEntry(report, "Tamaño")?.value || ""}</span>
                 </div>
+              </div>
+
+              <div className="section">
+                <span className="label">Metadata encontrada</span>
+                {report ? (
+                  <div className="meta-list">
+                    {systemEntries.map((entry, index) => (
+                      <div key={`${entry.label}-${index}`} className="meta-row">
+                        <span>{entry.label}</span>
+                        <span className="meta-value">{entry.value}</span>
+                      </div>
+                    ))}
+                    {report.internal.map((section) => (
+                      <div key={section.title} className="meta-group">
+                        <div className="section-title">{section.title}</div>
+                        {section.entries.map((entry, index) => (
+                          <div key={`${section.title}-${index}`} className="meta-row">
+                            <span>{entry.label}</span>
+                            <span className="meta-value">{entry.value}</span>
+                          </div>
+                        ))}
+                        {section.notice && (
+                          <div className={toneClass(section.notice.level)}>
+                            {section.notice.message}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {report.risks.length > 0 && (
+                      <div className="meta-group">
+                        <div className="section-title">Riesgos</div>
+                        {report.risks.map((entry, index) => (
+                          <div key={`risk-${index}`} className="meta-row">
+                            <span>{entry.label}</span>
+                            <span className="meta-value">{entry.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="muted">Ejecuta el analisis para ver los resultados.</p>
+                )}
+              </div>
+
+              <div className="section">
+                <span className="label">Acciones sobre metadata</span>
+                <div className="section-row">
+                  <button className="danger" onClick={handleRemoveMetadata} disabled={busy.remove || !report}>
+                    {busy.remove ? "Eliminando..." : "Eliminar metadata"}
+                  </button>
+                  {!isOffice && <span className="muted">Edicion disponible solo para Office.</span>}
+                </div>
+                {isOffice && (
+                  <div className="edit-grid">
+                    {Object.entries(OFFICE_FIELD_LABELS).map(([fieldKey, label]) => (
+                      <div key={fieldKey} className="edit-row">
+                        <label className="field">
+                          <span>{label}</span>
+                          <input
+                            value={officeValues[fieldKey as OfficeField]}
+                            onChange={(event) =>
+                              setOfficeValues((prev) => ({
+                                ...prev,
+                                [fieldKey]: event.target.value
+                              }))
+                            }
+                            placeholder="(vacio)"
+                          />
+                        </label>
+                        <button
+                          className="secondary"
+                          onClick={() => handleEditField(fieldKey as OfficeField)}
+                          disabled={busy.edit || !report}
+                        >
+                          Guardar
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
 
           {view === "clean" && (
-            <div className="grid two">
-              <div className="card">
-                <h3>Limpieza de directorio</h3>
-                <label className="field">
-                  <span>Ruta del directorio</span>
-                  <input
-                    value={dirPath}
-                    onChange={(event) => setDirPath(event.target.value)}
-                    placeholder="/Users/tu/Documentos"
-                  />
-                </label>
-                <div className="row">
-                  <label className="toggle">
-                    <input
-                      type="checkbox"
-                      checked={recursive}
-                      onChange={() => setRecursive((prev) => !prev)}
-                    />
-                    <span>Incluir subdirectorios</span>
-                  </label>
-                  <button className="ghost" onClick={handleSearchDirectories} disabled={busy.searchDir}>
-                    Buscar directorios
+            <div className="sheet">
+              <div className="section">
+                <span className="label">Modo</span>
+                <div className="segmented">
+                  <button
+                    className={cleanMode === "directory" ? "active" : ""}
+                    onClick={() => setCleanMode("directory")}
+                  >
+                    Directorio
                   </button>
-                </div>
-                <div className="row">
-                  <div className="pill-group">
-                    <button
-                      className={filter === "all" ? "pill active" : "pill"}
-                      onClick={() => setFilter("all")}
-                    >
-                      Todos
-                    </button>
-                    <button
-                      className={filter === "images" ? "pill active" : "pill"}
-                      onClick={() => setFilter("images")}
-                    >
-                      Imagenes
-                    </button>
-                    <button
-                      className={filter === "office" ? "pill active" : "pill"}
-                      onClick={() => setFilter("office")}
-                    >
-                      Office
-                    </button>
-                  </div>
-                </div>
-                <div className="cta-row">
-                  <button className="primary" onClick={handleAnalyzeDirectory} disabled={busy.dirAnalyze}>
-                    {busy.dirAnalyze ? "Analizando..." : "Analizar directorio"}
-                  </button>
-                  <button className="danger" onClick={handleStartCleanup} disabled={busy.cleanup}>
-                    {busy.cleanup ? "En proceso..." : "Iniciar limpieza"}
+                  <button
+                    className={cleanMode === "files" ? "active" : ""}
+                    onClick={() => setCleanMode("files")}
+                  >
+                    Archivos
                   </button>
                 </div>
               </div>
 
-              <div className="card">
-                <h3>Resumen</h3>
-                {dirSummary ? (
+              {cleanMode === "directory" ? (
+                <div className="section">
+                  <div className="section-row">
+                    <div>
+                      <span className="label">Directorio</span>
+                      <div className="path-box">{dirPath || "Ningun directorio seleccionado"}</div>
+                    </div>
+                    <button className="secondary" onClick={handlePickDirectory}>Explorar</button>
+                  </div>
+                  <div className="section-row">
+                    <label className="toggle">
+                      <input
+                        type="checkbox"
+                        checked={recursive}
+                        onChange={() => setRecursive((prev) => !prev)}
+                      />
+                      <span>Incluir subdirectorios</span>
+                    </label>
+                    <div className="segmented">
+                      <button
+                        className={filter === "all" ? "active" : ""}
+                        onClick={() => setFilter("all")}
+                      >
+                        Todos
+                      </button>
+                      <button
+                        className={filter === "images" ? "active" : ""}
+                        onClick={() => setFilter("images")}
+                      >
+                        Imagenes
+                      </button>
+                      <button
+                        className={filter === "office" ? "active" : ""}
+                        onClick={() => setFilter("office")}
+                      >
+                        Office
+                      </button>
+                    </div>
+                  </div>
+                  <div className="section-row">
+                    <button className="secondary" onClick={handleAnalyzeDirectory} disabled={busy.dirAnalyze}>
+                      {busy.dirAnalyze ? "Analizando..." : "Analizar"}
+                    </button>
+                    <button className="primary" onClick={handleStartCleanup} disabled={busy.cleanup}>
+                      {busy.cleanup ? "Procesando..." : "Limpiar"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="section">
+                  <div className="section-row">
+                    <div>
+                      <span className="label">Archivos</span>
+                      <div className="path-box">
+                        {selectedFiles.length ? `${selectedFiles.length} archivos seleccionados` : "Ningun archivo seleccionado"}
+                      </div>
+                    </div>
+                    <button className="secondary" onClick={handlePickFiles}>Explorar</button>
+                  </div>
+                  <div className="section-row">
+                    <div className="segmented">
+                      <button
+                        className={filter === "all" ? "active" : ""}
+                        onClick={() => setFilter("all")}
+                      >
+                        Todos
+                      </button>
+                      <button
+                        className={filter === "images" ? "active" : ""}
+                        onClick={() => setFilter("images")}
+                      >
+                        Imagenes
+                      </button>
+                      <button
+                        className={filter === "office" ? "active" : ""}
+                        onClick={() => setFilter("office")}
+                      >
+                        Office
+                      </button>
+                    </div>
+                  </div>
+                  {selectedFiles.length > 0 && (
+                    <div className="file-list">
+                      {selectedFiles.slice(0, 3).map((file) => (
+                        <div key={file} className="file-item">{file}</div>
+                      ))}
+                      {selectedFiles.length > 3 && (
+                        <div className="file-item muted">+ {selectedFiles.length - 3} mas</div>
+                      )}
+                    </div>
+                  )}
+                  <div className="section-row">
+                    <button className="secondary" onClick={handleAnalyzeFiles} disabled={busy.fileAnalyze}>
+                      {busy.fileAnalyze ? "Analizando..." : "Analizar"}
+                    </button>
+                    <button className="primary" onClick={handleStartCleanup} disabled={busy.cleanup}>
+                      {busy.cleanup ? "Procesando..." : "Limpiar"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="section">
+                <span className="label">Desglose</span>
+                {(cleanMode === "directory" ? dirSummary : fileSummary) ? (
                   <div className="summary">
                     <div className="summary-row">
                       <span>Total</span>
-                      <strong>{dirSummary.total_files}</strong>
+                      <strong>{(cleanMode === "directory" ? dirSummary : fileSummary)?.total_files}</strong>
                     </div>
                     <div className="summary-row">
                       <span>Imagenes</span>
-                      <strong>{dirSummary.images_count}</strong>
+                      <strong>{(cleanMode === "directory" ? dirSummary : fileSummary)?.images_count}</strong>
                     </div>
                     <div className="summary-row">
                       <span>Office</span>
-                      <strong>{dirSummary.office_count}</strong>
+                      <strong>{(cleanMode === "directory" ? dirSummary : fileSummary)?.office_count}</strong>
                     </div>
                     <div className="summary-section">
-                      <h4>Extensiones principales</h4>
+                      <span className="label">Extensiones principales</span>
                       {extensionCounts.map(([ext, count]) => (
                         <div key={ext} className="summary-row">
                           <span>{ext}</span>
@@ -595,12 +769,12 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  <p>Ejecuta el analisis para ver conteos.</p>
+                  <p className="muted">Ejecuta el analisis para ver el desglose.</p>
                 )}
               </div>
 
-              <div className="card wide">
-                <h3>Progreso de limpieza</h3>
+              <div className="section">
+                <span className="label">Progreso</span>
                 <div className="progress">
                   <div
                     className="progress-bar"
@@ -611,147 +785,13 @@ export default function App() {
                 </div>
                 <div className="summary-row">
                   <span>Actual</span>
-                  <strong>{cleanup.current || "-"}</strong>
+                  <span className="mono">{cleanup.current || "-"}</span>
                 </div>
                 <div className="summary-row">
                   <span>OK / ERR</span>
                   <strong>{cleanup.successes} / {cleanup.failures}</strong>
                 </div>
                 {cleanup.lastError && <p className="inline-error">Ultimo error: {cleanup.lastError}</p>}
-                {dirMatches.length > 0 && (
-                  <div className="match-list">
-                    {dirMatches.map((match) => (
-                      <button
-                        key={match}
-                        className="match"
-                        onClick={() => {
-                          setDirPath(match);
-                          showToast("info", "Directorio seleccionado");
-                        }}
-                      >
-                        {match}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {view === "report" && (
-            <div className="grid two">
-              <div className="card">
-                <h3>Reporte de metadata</h3>
-                {!report && <p>No hay reporte cargado. Ejecuta un analisis.</p>}
-                {report && (
-                  <div className="report-section">
-                    <h4>Sistema</h4>
-                    {report.system.map((entry, index) => (
-                      <div key={`${entry.label}-${index}`} className="report-row">
-                        <span>{entry.label}</span>
-                        <span className={levelClass(entry.level)}>{entry.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div className="card">
-                <h3>Metadata interna</h3>
-                {report?.internal?.length ? (
-                  report.internal.map((section) => (
-                    <div key={section.title} className="report-section">
-                      <h4>{section.title}</h4>
-                      {section.entries.map((entry, index) => (
-                        <div key={`${section.title}-${index}`} className="report-row">
-                          <span>{entry.label}</span>
-                          <span className={levelClass(entry.level)}>{entry.value}</span>
-                        </div>
-                      ))}
-                      {section.notice && (
-                        <div className={`notice ${toneClass(section.notice.level)}`}>
-                          {section.notice.message}
-                        </div>
-                      )}
-                    </div>
-                  ))
-                ) : (
-                  <p>Sin metadata interna para mostrar.</p>
-                )}
-              </div>
-
-              {report && (
-                <>
-                  <div className="card">
-                    <h3>Riesgos</h3>
-                    {report.risks.length ? (
-                      report.risks.map((entry, index) => (
-                        <div key={`risk-${index}`} className="report-row">
-                          <span>{entry.label}</span>
-                          <span className={levelClass(entry.level)}>{entry.value}</span>
-                        </div>
-                      ))
-                    ) : (
-                      <p>Sin riesgos detectados.</p>
-                    )}
-                  </div>
-                  <div className="card">
-                    <h3>Errores</h3>
-                    {report.errors.length ? (
-                      <ul className="error-list">
-                        {report.errors.map((error, index) => (
-                          <li key={`error-${index}`}>{error}</li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p>Sin errores reportados.</p>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {view === "edit" && (
-            <div className="grid two">
-              <div className="card">
-                <h3>Eliminar metadata</h3>
-                <p>Compatible con imagenes y documentos Office.</p>
-                <label className="field">
-                  <span>Ruta del archivo</span>
-                  <input
-                    value={filePath}
-                    onChange={(event) => setFilePath(event.target.value)}
-                    placeholder="/Users/tu/archivo.docx"
-                  />
-                </label>
-                <button className="danger" onClick={handleRemoveMetadata} disabled={busy.remove}>
-                  {busy.remove ? "Eliminando..." : "Eliminar metadata"}
-                </button>
-              </div>
-
-              <div className="card">
-                <h3>Editar metadata Office</h3>
-                <p>Solo para archivos .docx, .xlsx, .pptx.</p>
-                <label className="field">
-                  <span>Campo</span>
-                  <select value={editField} onChange={(event) => setEditField(event.target.value as OfficeField)}>
-                    <option value="author">Autor</option>
-                    <option value="title">Titulo</option>
-                    <option value="subject">Asunto</option>
-                    <option value="company">Empresa</option>
-                  </select>
-                </label>
-                <label className="field">
-                  <span>Nuevo valor</span>
-                  <input
-                    value={editValue}
-                    onChange={(event) => setEditValue(event.target.value)}
-                    placeholder="Nuevo valor"
-                  />
-                </label>
-                <button className="primary" onClick={handleEditMetadata} disabled={busy.edit}>
-                  {busy.edit ? "Actualizando..." : "Actualizar"}
-                </button>
               </div>
             </div>
           )}
@@ -759,7 +799,7 @@ export default function App() {
       </main>
 
       {toast && (
-        <div className={`toast ${toast.kind}`}>
+        <div className={`toast toast--${toast.kind}`}>
           <span>{toast.message}</span>
         </div>
       )}

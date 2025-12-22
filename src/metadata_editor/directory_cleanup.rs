@@ -143,8 +143,56 @@ pub fn collect_candidate_files(
     Ok(files)
 }
 
+pub fn filter_files(paths: &[PathBuf], filter: DirectoryFilter) -> Vec<PathBuf> {
+    paths
+        .iter()
+        .filter(|path| path.is_file() && filter.matches(path))
+        .cloned()
+        .collect()
+}
+
 pub fn analyze_directory(path: &Path, recursive: bool) -> Result<DirectoryAnalysisSummary, String> {
     let analysis = analyze_directory_content(path, recursive)?;
+    Ok(DirectoryAnalysisSummary::from(&analysis))
+}
+
+pub fn analyze_files(paths: &[PathBuf]) -> Result<DirectoryAnalysisSummary, String> {
+    if paths.is_empty() {
+        return Err("No se recibieron archivos para analizar".to_string());
+    }
+
+    let mut analysis = DirectoryAnalysis::default();
+
+    for path in paths {
+        if !path.is_file() {
+            continue;
+        }
+        analysis.total_files += 1;
+
+        let ext_owned = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_lowercase());
+        let ext = ext_owned.as_deref();
+
+        if let Some(ext) = ext {
+            if is_supported_image(ext) {
+                analysis.images_count += 1;
+                analysis.image_extensions.insert(ext.to_string());
+            }
+            if is_supported_office(ext) {
+                analysis.office_count += 1;
+                analysis.office_extensions.insert(ext.to_string());
+            }
+        }
+
+        analysis.record_extension(ext);
+    }
+
+    if analysis.total_files == 0 {
+        return Err("No se detectaron archivos validos para analizar".to_string());
+    }
+
     Ok(DirectoryAnalysisSummary::from(&analysis))
 }
 
