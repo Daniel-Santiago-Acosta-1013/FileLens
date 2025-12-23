@@ -9,6 +9,25 @@ FileLens is a desktop metadata analyzer/cleaner built with **Tauri v2** (Rust ba
 - `frontend/` — React + Vite UI.
 - `tests/` — Rust tests (if present).
 
+## Backend commands & events
+Frontend calls Tauri commands via `@tauri-apps/api/core` `invoke`:
+- `analyze_file(path, include_hash)`
+- `analyze_directory(path, recursive)`
+- `analyze_files(paths)`
+- `remove_metadata(path)`
+- `edit_office_metadata(path, field, value)`
+- `start_cleanup(path, recursive, filter)`
+- `start_cleanup_files(paths, filter)`
+- `pick_file()`, `pick_directory()`, `pick_files()`
+- `search_files(query)` and `search_directories(query)` (available but optional)
+
+Cleanup progress is emitted as `cleanup://progress` with payloads:
+`started`, `processing`, `success`, `failure`, `finished` (see `src-tauri/src/main.rs`).
+
+## Drag & drop notes (Tauri v2)
+File drops are handled via Tauri’s `onDragDropEvent` from the current webview/window.  
+HTML5 drag-and-drop may not yield filesystem paths in the browser; the app relies on Tauri events for real file paths.
+
 ## Frontend structure (Atomic design)
 The frontend uses an atomic-style component structure:
 - `frontend/src/components/atoms/` — Small primitives (e.g. Button, Toggle).
@@ -26,6 +45,14 @@ Each component or view lives in its own folder with this structure:
   Component.tsx
   Component.css
 ```
+
+## UI entry points
+- `frontend/src/App.tsx` orchestrates state and backend calls.
+- `frontend/src/views/AnalyzeView/AnalyzeView.tsx` and `frontend/src/views/CleanView/CleanView.tsx` render the main screens.
+
+## Icons & branding
+App icons live under `src-tauri/icons/` and are referenced in `src-tauri/tauri.conf.json` under `bundle.icon`.
+Replace those files to change the application icon across platforms.
 
 ## Running the app
 - Dev (Tauri): `cargo tauri dev`
