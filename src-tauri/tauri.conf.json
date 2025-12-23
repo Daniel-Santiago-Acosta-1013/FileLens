@@ -15,7 +15,8 @@
         "title": "FileLens",
         "width": 1200,
         "height": 780,
-        "resizable": true
+        "resizable": true,
+        "dragDropEnabled": true
       }
     ],
     "security": {

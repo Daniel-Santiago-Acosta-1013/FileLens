@@ -3,6 +3,7 @@ import type { DragEvent, HTMLAttributes } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import AppShell from "./components/layout/AppShell/AppShell";
 import Sidebar from "./components/organisms/Sidebar/Sidebar";
@@ -48,6 +49,8 @@ export default function App() {
 
   const [toast, setToast] = useState<ToastType | null>(null);
   const toastTimer = useRef<number | null>(null);
+  const lastDropRef = useRef<{ signature: string; time: number } | null>(null);
+  const pendingDropPathsRef = useRef<string[]>([]);
 
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const dropTargetRef = useRef<DropTarget | null>(null);
@@ -208,6 +211,25 @@ export default function App() {
     applyFiles(paths, paths.length === 1 ? "Archivo cargado" : "Archivos cargados");
   };
 
+  const applyDroppedPathsOnce = (paths: string[], target: DropTarget) => {
+    if (!paths.length) return;
+    const signature = paths.join("|");
+    const now = Date.now();
+    const lastDrop = lastDropRef.current;
+    if (lastDrop && lastDrop.signature === signature && now - lastDrop.time < 400) {
+      return;
+    }
+    lastDropRef.current = { signature, time: now };
+    applyDroppedPaths(paths, target);
+  };
+
+  const extractPathsFromEvent = (event: DragEvent<HTMLDivElement>) => {
+    const files = Array.from(event.dataTransfer?.files ?? []);
+    return files
+      .map((file) => (file as File & { path?: string }).path)
+      .filter((path): path is string => Boolean(path));
+  };
+
   const dropZoneHandlers = (target: DropTarget): HTMLAttributes<HTMLDivElement> => ({
     onDragEnter: (event: DragEvent<HTMLDivElement>) => {
       event.preventDefault();
@@ -228,32 +250,64 @@ export default function App() {
     },
     onDrop: (event: DragEvent<HTMLDivElement>) => {
       event.preventDefault();
+      const droppedPaths = extractPathsFromEvent(event);
+      if (droppedPaths.length) {
+        applyDroppedPathsOnce(droppedPaths, target);
+      }
       setDropTargetState(null);
     }
   });
 
   useEffect(() => {
-    let stop: (() => void) | null = null;
+    let stopWebview: (() => void) | null = null;
+    let stopWindow: (() => void) | null = null;
+
+    const handleDragDropEvent = (event: { payload: { type: string; paths?: string[] } }) => {
+      if (event.payload.type === "enter" || event.payload.type === "over") {
+        if (event.payload.paths?.length) {
+          pendingDropPathsRef.current = event.payload.paths;
+        }
+        setDropTargetState(resolveDropTarget());
+        return;
+      }
+      if (event.payload.type === "drop") {
+        const target = dropTargetRef.current ?? resolveDropTarget();
+        const paths =
+          event.payload.paths && event.payload.paths.length > 0
+            ? event.payload.paths
+            : pendingDropPathsRef.current;
+        applyDroppedPathsOnce(paths ?? [], target);
+        setDropTargetState(null);
+        pendingDropPathsRef.current = [];
+        return;
+      }
+      if (event.payload.type === "leave") {
+        setDropTargetState(null);
+        pendingDropPathsRef.current = [];
+      }
+    };
+
     getCurrentWebview()
-      .onDragDropEvent((event) => {
-        if (event.payload.type === "drop") {
-          const target = dropTargetRef.current ?? resolveDropTarget();
-          applyDroppedPaths(event.payload.paths, target);
-          setDropTargetState(null);
-        }
-        if (event.payload.type === "leave") {
-          setDropTargetState(null);
-        }
-      })
+      .onDragDropEvent(handleDragDropEvent)
       .then((unlisten) => {
-        stop = unlisten;
+        stopWebview = unlisten;
+      })
+      .catch(() => {
+        showToast("error", "No se pudo habilitar arrastrar y soltar");
+      });
+
+    getCurrentWindow()
+      .onDragDropEvent(handleDragDropEvent)
+      .then((unlisten) => {
+        stopWindow = unlisten;
       })
       .catch(() => {
         showToast("error", "No se pudo habilitar arrastrar y soltar");
       });
 
     return () => {
-      if (stop) stop();
+      if (stopWebview) stopWebview();
+      if (stopWindow) stopWindow();
     };
   }, [view, cleanMode]);
 
