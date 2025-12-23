@@ -5,6 +5,8 @@ use crate::metadata::report::{EntryLevel, ReportEntry, ReportSection, SectionNot
 use lopdf::{Document, Object};
 use std::path::Path;
 
+use super::xmp::parse_xmp_metadata;
+
 pub fn extract_pdf_metadata(path: &Path) -> AdvancedMetadataResult {
     let mut section = ReportSection::new("Metadata PDF");
     let mut risks = Vec::new();
@@ -20,85 +22,107 @@ pub fn extract_pdf_metadata(path: &Path) -> AdvancedMetadataResult {
         }
     };
 
-    let info_ref = match doc.trailer.get(b"Info") {
-        Ok(info) => info,
-        Err(_) => {
-            section.notice = Some(SectionNotice::new(
-                "No se encontró metadata adicional en este PDF",
-                EntryLevel::Muted,
-            ));
-            return AdvancedMetadataResult { section, risks };
-        }
-    };
-
-    let info_dict = match deref_dictionary(&doc, info_ref) {
-        Some(dict) => dict,
-        None => {
-            section.notice = Some(SectionNotice::new(
-                "No se encontró metadata adicional en este PDF",
-                EntryLevel::Muted,
-            ));
-            return AdvancedMetadataResult { section, risks };
-        }
-    };
-
     let mut has_entries = false;
-    has_entries |= push_pdf_entry(&doc, info_dict, b"Title", "Título", false, &mut section, &mut risks);
-    has_entries |= push_pdf_entry(&doc, info_dict, b"Author", "Autor", true, &mut section, &mut risks);
-    has_entries |= push_pdf_entry(
-        &doc,
-        info_dict,
-        b"Subject",
-        "Asunto",
-        false,
-        &mut section,
-        &mut risks,
-    );
-    has_entries |= push_pdf_entry(
-        &doc,
-        info_dict,
-        b"Keywords",
-        "Palabras clave",
-        false,
-        &mut section,
-        &mut risks,
-    );
-    has_entries |= push_pdf_entry(
-        &doc,
-        info_dict,
-        b"Creator",
-        "Creador",
-        true,
-        &mut section,
-        &mut risks,
-    );
-    has_entries |= push_pdf_entry(
-        &doc,
-        info_dict,
-        b"Producer",
-        "Productor",
-        true,
-        &mut section,
-        &mut risks,
-    );
-    has_entries |= push_pdf_entry(
-        &doc,
-        info_dict,
-        b"CreationDate",
-        "Fecha de creación",
-        false,
-        &mut section,
-        &mut risks,
-    );
-    has_entries |= push_pdf_entry(
-        &doc,
-        info_dict,
-        b"ModDate",
-        "Fecha de modificación",
-        false,
-        &mut section,
-        &mut risks,
-    );
+    if let Ok(info_ref) = doc.trailer.get(b"Info") {
+        if let Some(info_dict) = deref_dictionary(&doc, info_ref) {
+            has_entries |= push_pdf_entry(
+                &doc,
+                info_dict,
+                b"Title",
+                "Título",
+                false,
+                &mut section,
+                &mut risks,
+            );
+            has_entries |= push_pdf_entry(
+                &doc,
+                info_dict,
+                b"Author",
+                "Autor",
+                true,
+                &mut section,
+                &mut risks,
+            );
+            has_entries |= push_pdf_entry(
+                &doc,
+                info_dict,
+                b"Subject",
+                "Asunto",
+                false,
+                &mut section,
+                &mut risks,
+            );
+            has_entries |= push_pdf_entry(
+                &doc,
+                info_dict,
+                b"Keywords",
+                "Palabras clave",
+                false,
+                &mut section,
+                &mut risks,
+            );
+            has_entries |= push_pdf_entry(
+                &doc,
+                info_dict,
+                b"Creator",
+                "Creador",
+                true,
+                &mut section,
+                &mut risks,
+            );
+            has_entries |= push_pdf_entry(
+                &doc,
+                info_dict,
+                b"Producer",
+                "Productor",
+                true,
+                &mut section,
+                &mut risks,
+            );
+            has_entries |= push_pdf_entry(
+                &doc,
+                info_dict,
+                b"CreationDate",
+                "Fecha de creación",
+                false,
+                &mut section,
+                &mut risks,
+            );
+            has_entries |= push_pdf_entry(
+                &doc,
+                info_dict,
+                b"ModDate",
+                "Fecha de modificación",
+                false,
+                &mut section,
+                &mut risks,
+            );
+        }
+    }
+
+    if let Some(xmp_packet) = extract_pdf_xmp(&doc) {
+        let entries_before = section.entries.len();
+        let mut xmp_added = false;
+        if let Some(xmp) = parse_xmp_metadata(&xmp_packet) {
+            for entry in xmp.entries {
+                section.entries.push(entry);
+            }
+            if !xmp.risks.is_empty() {
+                risks.extend(xmp.risks);
+            }
+            xmp_added = section.entries.len() > entries_before;
+        }
+        if !xmp_added {
+            section
+                .entries
+                .push(ReportEntry::warning("XMP", "Detectado"));
+            risks.push(ReportEntry::warning(
+                "XMP embebido",
+                "Puede contener metadata adicional",
+            ));
+        }
+        has_entries = true;
+    }
 
     if !has_entries {
         section.notice = Some(SectionNotice::new(
@@ -160,6 +184,30 @@ fn object_to_string(doc: &Document, obj: &Object) -> Option<String> {
             .get_object(*reference)
             .ok()
             .and_then(|inner| object_to_string(doc, inner)),
+        _ => None,
+    }
+}
+
+fn extract_pdf_xmp(doc: &Document) -> Option<String> {
+    let catalog = doc.catalog().ok()?;
+    let metadata_obj = catalog.get(b"Metadata").ok()?;
+    let stream = deref_stream(doc, metadata_obj)?;
+    let content = stream
+        .decompressed_content()
+        .unwrap_or_else(|_| stream.content.clone());
+    if content.is_empty() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&content).to_string())
+}
+
+fn deref_stream<'a>(doc: &'a Document, obj: &'a Object) -> Option<&'a lopdf::Stream> {
+    match obj {
+        Object::Reference(reference) => doc
+            .get_object(*reference)
+            .ok()
+            .and_then(|inner| inner.as_stream().ok()),
+        Object::Stream(stream) => Some(stream),
         _ => None,
     }
 }

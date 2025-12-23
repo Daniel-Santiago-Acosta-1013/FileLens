@@ -11,8 +11,9 @@ masiva en directorios completos con una interfaz moderna y clara.
 - **Análisis detallado de archivos**: muestra tamaño legible, permisos en
   octal y `rwx`, propietario/grupo (Unix), tipo MIME, hash SHA-256
   (opcional en archivos ≤ 32 MiB), fechas clave y destino de enlaces simbólicos.
-- **Metadata interna por formato**: EXIF + detección de XMP/IPTC en imágenes,
-  diccionario Info en PDFs y propiedades core/app/custom en documentos Office.
+- **Metadata interna por formato**: EXIF + lectura de XMP/IPTC y detalles PNG/ICC
+  en imágenes, diccionario Info + XMP en PDFs y propiedades core/app/custom en
+  documentos Office.
 - **Resumen de riesgos**: destaca campos sensibles (autoría, empresa, GPS, etc.).
 - **Informe inteligente de directorios**: antes de limpiar, enumera todas las
   extensiones encontradas, destaca las compatibles con limpieza (imágenes y
@@ -121,10 +122,10 @@ cargo test
 
 ## Alcance actual y limitaciones
 
-- **Imágenes**: se extrae EXIF y se detecta la presencia de XMP/IPTC; la
-  interpretación completa de XMP/IPTC es una mejora pendiente.
-- **PDF**: se lee el diccionario Info (autor, productor, fechas, etc.); XMP
-  embebido aún no se analiza.
+- **Imágenes**: se extrae EXIF, texto PNG e ICC, además de campos base de
+  XMP/IPTC; la interpretación completa de XMP/IPTC es una mejora pendiente.
+- **PDF**: se lee el diccionario Info (autor, productor, fechas, etc.) y XMP
+  embebido (campos base).
 - **Office**: se leen `core.xml`, `app.xml` y `custom.xml` con parseo XML robusto.
 - **Audio/video**: no hay análisis de metadata por ahora.
 - **Edición de imágenes**: por ahora solo se soporta eliminación de metadata,

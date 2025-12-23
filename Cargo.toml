@@ -13,6 +13,8 @@ exif = { package = "kamadak-exif", version = "0.5" }
 image = "0.25"
 infer = "0.15"
 lopdf = "0.34"
+md-5 = "0.10"
+png = "0.18"
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 users = "0.11"

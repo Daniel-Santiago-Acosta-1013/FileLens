@@ -4,9 +4,10 @@ use crate::advanced_metadata::{extract_image_metadata, extract_office_metadata, 
 use crate::directory::{count_directory_entries, EntryKind};
 use crate::formatting::{format_optional_time, format_size};
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 
-use super::hashing::file_hash;
+use super::hashing::file_hashes;
 use super::mime::mime_type;
 use super::report::{MetadataOptions, MetadataReport, ReportEntry, ReportSection};
 
@@ -168,14 +169,36 @@ fn collect_file_specifics(
         entries.push(ReportEntry::info("Tipo MIME", mime));
     }
 
-    let hash_value = if options.include_hash {
-        file_hash(path, metadata)
+    if let Some(header) = read_file_header(path) {
+        entries.push(ReportEntry::info("Encabezado (hex)", header));
+    }
+
+    if options.include_hash {
+        let hashes = file_hashes(path, metadata);
+        entries.push(ReportEntry::info("Hash MD5", hashes.md5));
+        entries.push(ReportEntry::info("Hash SHA-256", hashes.sha256));
     } else {
-        "Omitido (desactivado)".to_string()
-    };
-    entries.push(ReportEntry::info("Hash SHA-256", hash_value));
+        entries.push(ReportEntry::info("Hash MD5", "Omitido (desactivado)"));
+        entries.push(ReportEntry::info("Hash SHA-256", "Omitido (desactivado)"));
+    }
 
     entries
+}
+
+fn read_file_header(path: &Path) -> Option<String> {
+    const HEADER_LIMIT: usize = 64;
+    let mut file = fs::File::open(path).ok()?;
+    let mut buffer = [0_u8; HEADER_LIMIT];
+    let bytes_read = file.read(&mut buffer).ok()?;
+    if bytes_read == 0 {
+        return None;
+    }
+    let header = buffer[..bytes_read]
+        .iter()
+        .map(|byte| format!("{:02X}", byte))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Some(header)
 }
 
 fn collect_timestamps(metadata: &fs::Metadata) -> Vec<ReportEntry> {

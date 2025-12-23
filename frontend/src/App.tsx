@@ -518,7 +518,7 @@ export default function App() {
                       checked={includeHash}
                       onChange={() => setIncludeHash((prev) => !prev)}
                     />
-                    <span>Calcular hash SHA-256</span>
+                    <span>Calcular hashes (MD5 + SHA-256)</span>
                   </label>
                   <button className="primary" onClick={handleAnalyze} disabled={busy.analyze}>
                     {busy.analyze ? "Analizando..." : "Analizar"}

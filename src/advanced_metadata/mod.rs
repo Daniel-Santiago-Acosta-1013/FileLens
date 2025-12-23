@@ -1,8 +1,10 @@
 //! Recolección de metadata avanzada para diferentes tipos de archivo.
 
+mod icc;
 mod image;
 mod office;
 mod pdf;
+mod xmp;
 
 use crate::metadata::report::{ReportEntry, ReportSection};
 

@@ -1242,6 +1242,8 @@ dependencies = [
  "infer 0.15.0",
  "kamadak-exif",
  "lopdf",
+ "md-5",
+ "png 0.18.0",
  "serde",
  "sha2",
  "tempfile",
