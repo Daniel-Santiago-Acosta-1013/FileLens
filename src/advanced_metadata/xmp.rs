@@ -56,6 +56,11 @@ pub fn parse_xmp_metadata(packet: &str) -> Option<XmpMetadata> {
             sensitive: true,
         },
         XmpFieldSpec {
+            label: "XMP Licencia",
+            keys: &["xmpRights:UsageTerms", "cc:license", "license"],
+            sensitive: true,
+        },
+        XmpFieldSpec {
             label: "XMP Herramienta",
             keys: &["xmp:CreatorTool", "CreatorTool"],
             sensitive: false,
@@ -76,6 +81,16 @@ pub fn parse_xmp_metadata(packet: &str) -> Option<XmpMetadata> {
             sensitive: false,
         },
         XmpFieldSpec {
+            label: "XMP Rating",
+            keys: &["xmp:Rating", "Rating"],
+            sensitive: false,
+        },
+        XmpFieldSpec {
+            label: "XMP Label",
+            keys: &["xmp:Label", "Label"],
+            sensitive: false,
+        },
+        XmpFieldSpec {
             label: "XMP Productor PDF",
             keys: &["pdf:Producer", "Producer"],
             sensitive: false,
@@ -93,6 +108,21 @@ pub fn parse_xmp_metadata(packet: &str) -> Option<XmpMetadata> {
         XmpFieldSpec {
             label: "XMP Instancia",
             keys: &["xmpMM:InstanceID", "InstanceID"],
+            sensitive: false,
+        },
+        XmpFieldSpec {
+            label: "XMP Historial",
+            keys: &["xmpMM:History", "photoshop:History", "History"],
+            sensitive: false,
+        },
+        XmpFieldSpec {
+            label: "XMP Ancestros",
+            keys: &["photoshop:DocumentAncestors", "DocumentAncestors"],
+            sensitive: false,
+        },
+        XmpFieldSpec {
+            label: "XMP Información de edición",
+            keys: &["photoshop:Credit", "photoshop:Source", "xmpMM:DerivedFrom"],
             sensitive: false,
         },
     ];

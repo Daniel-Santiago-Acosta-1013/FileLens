@@ -18,9 +18,16 @@ export const CLEANUP_EMPTY: CleanupState = {
 };
 
 export const SYSTEM_ALLOWLIST = new Set([
+  "Nombre",
   "Tipo",
+  "Tipo de archivo",
+  "Extensión del tipo de archivo",
   "Tamaño",
+  "Tamaño (bytes)",
+  "Categoría",
+  "Encabezado (hex)",
   "Tipo MIME",
+  "Hash MD5",
   "Hash SHA-256",
   "Última modificación",
   "Fecha de creación"

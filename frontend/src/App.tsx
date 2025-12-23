@@ -66,7 +66,9 @@ export default function App() {
 
   const systemEntries = useMemo(() => extractSystem(report), [report]);
   const mimeEntry = useMemo<ReportEntry | null>(() => getEntry(report, "Tipo MIME"), [report]);
-  const typeEntry = useMemo<ReportEntry | null>(() => getEntry(report, "Tipo"), [report]);
+  const typeEntry = useMemo<ReportEntry | null>(() => {
+    return getEntry(report, "Tipo de archivo") ?? getEntry(report, "Tipo");
+  }, [report]);
 
   const extensionCounts = useMemo(() => {
     const summary = cleanMode === "directory" ? dirSummary : fileSummary;
