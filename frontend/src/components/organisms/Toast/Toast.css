@@ -1,0 +1,22 @@
+.toast {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.toast--success {
+  border-color: rgba(43, 217, 200, 0.4);
+}
+
+.toast--warning {
+  border-color: rgba(255, 196, 90, 0.4);
+}
+
+.toast--error {
+  border-color: rgba(255, 107, 107, 0.4);
+}

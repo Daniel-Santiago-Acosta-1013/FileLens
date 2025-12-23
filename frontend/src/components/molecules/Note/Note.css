@@ -1,0 +1,32 @@
+.note {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  border: 1px solid transparent;
+}
+
+.note--info {
+  background: rgba(43, 217, 200, 0.08);
+  border-color: rgba(43, 217, 200, 0.2);
+}
+
+.note--success {
+  background: rgba(43, 217, 200, 0.14);
+  border-color: rgba(43, 217, 200, 0.3);
+}
+
+.note--warning {
+  background: rgba(255, 196, 90, 0.12);
+  border-color: rgba(255, 196, 90, 0.25);
+}
+
+.note--error {
+  background: rgba(255, 107, 107, 0.12);
+  border-color: rgba(255, 107, 107, 0.25);
+}
+
+.note--muted {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.12);
+}

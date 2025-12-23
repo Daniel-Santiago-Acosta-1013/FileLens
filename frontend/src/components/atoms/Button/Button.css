@@ -1,0 +1,33 @@
+.primary,
+.secondary,
+.danger {
+  border: 1px solid transparent;
+  border-radius: 9px;
+  padding: 9px 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.primary {
+  background: var(--accent);
+  color: #041415;
+}
+
+.secondary {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.16);
+  color: var(--text);
+}
+
+.danger {
+  background: rgba(255, 107, 107, 0.16);
+  border-color: rgba(255, 107, 107, 0.4);
+  color: #ffb4b4;
+}
+
+.primary:hover,
+.secondary:hover,
+.danger:hover {
+  transform: translateY(-1px);
+}

@@ -1,0 +1,77 @@
+.drop-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+  border-radius: 14px;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  padding: 16px 18px;
+  background: linear-gradient(135deg, rgba(43, 217, 200, 0.08), rgba(255, 255, 255, 0.02));
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.drop-zone--active {
+  border-color: rgba(43, 217, 200, 0.75);
+  background: rgba(43, 217, 200, 0.14);
+  box-shadow: 0 0 0 1px rgba(43, 217, 200, 0.2) inset;
+}
+
+.drop-zone__content {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.drop-zone__icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: rgba(43, 217, 200, 0.16);
+  border: 1px solid rgba(43, 217, 200, 0.35);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.drop-zone__icon svg {
+  width: 26px;
+  height: 26px;
+}
+
+.drop-zone__text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.drop-zone__text strong {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.drop-zone__text span {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.drop-zone__path {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 0.82rem;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.drop-zone__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}

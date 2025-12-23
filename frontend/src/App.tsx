@@ -1,139 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { DragEvent, HTMLAttributes } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 
-type ViewId = "analyze" | "clean";
-
-type EntryLevel = "Info" | "Warning" | "Success" | "Error" | "Muted";
-
-type ReportEntry = {
-  label: string;
-  value: string;
-  level: EntryLevel;
-};
-
-type SectionNotice = {
-  message: string;
-  level: EntryLevel;
-};
-
-type ReportSection = {
-  title: string;
-  entries: ReportEntry[];
-  notice?: SectionNotice | null;
-};
-
-type MetadataReport = {
-  system: ReportEntry[];
-  internal: ReportSection[];
-  risks: ReportEntry[];
-  errors: string[];
-};
-
-type DirectoryAnalysisSummary = {
-  total_files: number;
-  images_count: number;
-  office_count: number;
-  extension_counts: [string, number][];
-  image_extensions: string[];
-  office_extensions: string[];
-};
-
-type CleanupProgress =
-  | { type: "started"; total: number }
-  | { type: "processing"; index: number; total: number; path: string }
-  | { type: "success"; path: string }
-  | { type: "failure"; path: string; error: string }
-  | { type: "finished"; successes: number; failures: number };
-
-type ToastKind = "info" | "success" | "warning" | "error";
-
-type Toast = {
-  kind: ToastKind;
-  message: string;
-};
-
-type CleanupState = {
-  running: boolean;
-  total: number;
-  index: number;
-  successes: number;
-  failures: number;
-  current: string;
-  lastError: string;
-  finished: boolean;
-};
-
-type Filter = "all" | "images" | "office";
-
-type OfficeField = "author" | "title" | "subject" | "company";
-
-const NAV_ITEMS: { id: ViewId; label: string }[] = [
-  { id: "analyze", label: "Analisis" },
-  { id: "clean", label: "Limpieza" }
-];
-
-const CLEANUP_EMPTY: CleanupState = {
-  running: false,
-  total: 0,
-  index: 0,
-  successes: 0,
-  failures: 0,
-  current: "",
-  lastError: "",
-  finished: false
-};
-
-const SYSTEM_ALLOWLIST = new Set([
-  "Tipo",
-  "Tamaño",
-  "Tipo MIME",
-  "Hash SHA-256",
-  "Última modificación",
-  "Fecha de creación"
-]);
-
-const OFFICE_FIELD_LABELS: Record<OfficeField, string> = {
-  author: "Creador",
-  title: "Título",
-  subject: "Asunto",
-  company: "Empresa"
-};
-
-function getEntry(report: MetadataReport | null, label: string) {
-  if (!report) return null;
-  return report.system.find((entry) => entry.label === label) ?? null;
-}
-
-function extractSystem(report: MetadataReport | null) {
-  if (!report) return [] as ReportEntry[];
-  return report.system.filter((entry) => SYSTEM_ALLOWLIST.has(entry.label));
-}
-
-function extractOfficeValue(report: MetadataReport | null, label: string) {
-  if (!report) return "";
-  for (const section of report.internal) {
-    for (const entry of section.entries) {
-      if (entry.label === label) return entry.value;
-    }
-  }
-  return "";
-}
-
-function toneClass(level: EntryLevel) {
-  switch (level) {
-    case "Success":
-      return "note note--success";
-    case "Warning":
-      return "note note--warning";
-    case "Error":
-      return "note note--error";
-    case "Muted":
-      return "note note--muted";
-    default:
-      return "note note--info";
-  }
-}
+import AppShell from "./components/layout/AppShell/AppShell";
+import Sidebar from "./components/organisms/Sidebar/Sidebar";
+import Topbar from "./components/organisms/Topbar/Topbar";
+import Toast from "./components/organisms/Toast/Toast";
+import AnalyzeView from "./views/AnalyzeView/AnalyzeView";
+import CleanView from "./views/CleanView/CleanView";
+import { CLEANUP_EMPTY, NAV_ITEMS } from "./constants";
+import type { CleanupProgress, CleanupState, DirectoryAnalysisSummary } from "./types/cleanup";
+import type { MetadataReport, ReportEntry } from "./types/metadata";
+import type {
+  CleanMode,
+  DropTarget,
+  Filter,
+  OfficeField,
+  Toast as ToastType,
+  ToastKind,
+  ViewId
+} from "./types/ui";
+import { buildOfficeValues, extractSystem, getEntry } from "./utils/metadata";
 
 export default function App() {
   const [view, setView] = useState<ViewId>("analyze");
@@ -148,7 +37,7 @@ export default function App() {
     company: ""
   });
 
-  const [cleanMode, setCleanMode] = useState<"directory" | "files">("directory");
+  const [cleanMode, setCleanMode] = useState<CleanMode>("directory");
   const [dirPath, setDirPath] = useState("");
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [recursive, setRecursive] = useState(false);
@@ -157,8 +46,11 @@ export default function App() {
   const [fileSummary, setFileSummary] = useState<DirectoryAnalysisSummary | null>(null);
   const [cleanup, setCleanup] = useState<CleanupState>(CLEANUP_EMPTY);
 
-  const [toast, setToast] = useState<Toast | null>(null);
+  const [toast, setToast] = useState<ToastType | null>(null);
   const toastTimer = useRef<number | null>(null);
+
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+  const dropTargetRef = useRef<DropTarget | null>(null);
 
   const [busy, setBusy] = useState({
     analyze: false,
@@ -170,8 +62,8 @@ export default function App() {
   });
 
   const systemEntries = useMemo(() => extractSystem(report), [report]);
-  const mimeEntry = useMemo(() => getEntry(report, "Tipo MIME"), [report]);
-  const typeEntry = useMemo(() => getEntry(report, "Tipo"), [report]);
+  const mimeEntry = useMemo<ReportEntry | null>(() => getEntry(report, "Tipo MIME"), [report]);
+  const typeEntry = useMemo<ReportEntry | null>(() => getEntry(report, "Tipo"), [report]);
 
   const extensionCounts = useMemo(() => {
     const summary = cleanMode === "directory" ? dirSummary : fileSummary;
@@ -194,12 +86,7 @@ export default function App() {
   }, [filePath, mimeEntry]);
 
   useEffect(() => {
-    setOfficeValues({
-      author: extractOfficeValue(report, OFFICE_FIELD_LABELS.author),
-      title: extractOfficeValue(report, OFFICE_FIELD_LABELS.title),
-      subject: extractOfficeValue(report, OFFICE_FIELD_LABELS.subject),
-      company: extractOfficeValue(report, OFFICE_FIELD_LABELS.company)
-    });
+    setOfficeValues(buildOfficeValues(report));
   }, [report]);
 
   useEffect(() => {
@@ -277,33 +164,117 @@ export default function App() {
     toastTimer.current = window.setTimeout(() => setToast(null), 3600);
   };
 
+  const setDropTargetState = (target: DropTarget | null) => {
+    dropTargetRef.current = target;
+    setDropTarget(target);
+  };
+
+  const resolveDropTarget = () => {
+    if (view === "analyze") return "analyze-file";
+    return cleanMode === "directory" ? "clean-directory" : "clean-files";
+  };
+
+  const applyFilePath = (path: string, message = "Archivo seleccionado") => {
+    setFilePath(path);
+    setReport(null);
+    setReportError("");
+    showToast("info", message);
+  };
+
+  const applyDirectoryPath = (path: string, message = "Directorio seleccionado") => {
+    setDirPath(path);
+    setDirSummary(null);
+    setCleanup(CLEANUP_EMPTY);
+    showToast("info", message);
+  };
+
+  const applyFiles = (paths: string[], message?: string) => {
+    setSelectedFiles(paths);
+    setFileSummary(null);
+    setCleanup(CLEANUP_EMPTY);
+    showToast("info", message ?? `${paths.length} archivos seleccionados`);
+  };
+
+  const applyDroppedPaths = (paths: string[], target: DropTarget) => {
+    if (!paths.length) return;
+    if (target === "analyze-file") {
+      applyFilePath(paths[0], "Archivo cargado");
+      return;
+    }
+    if (target === "clean-directory") {
+      applyDirectoryPath(paths[0], "Directorio cargado");
+      return;
+    }
+    applyFiles(paths, paths.length === 1 ? "Archivo cargado" : "Archivos cargados");
+  };
+
+  const dropZoneHandlers = (target: DropTarget): HTMLAttributes<HTMLDivElement> => ({
+    onDragEnter: (event: DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      setDropTargetState(target);
+    },
+    onDragOver: (event: DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      if (dropTargetRef.current !== target) {
+        setDropTargetState(target);
+      }
+    },
+    onDragLeave: (event: DragEvent<HTMLDivElement>) => {
+      const relatedTarget = event.relatedTarget as Node | null;
+      if (relatedTarget && event.currentTarget.contains(relatedTarget)) {
+        return;
+      }
+      setDropTargetState(null);
+    },
+    onDrop: (event: DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      setDropTargetState(null);
+    }
+  });
+
+  useEffect(() => {
+    let stop: (() => void) | null = null;
+    getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (event.payload.type === "drop") {
+          const target = dropTargetRef.current ?? resolveDropTarget();
+          applyDroppedPaths(event.payload.paths, target);
+          setDropTargetState(null);
+        }
+        if (event.payload.type === "leave") {
+          setDropTargetState(null);
+        }
+      })
+      .then((unlisten) => {
+        stop = unlisten;
+      })
+      .catch(() => {
+        showToast("error", "No se pudo habilitar arrastrar y soltar");
+      });
+
+    return () => {
+      if (stop) stop();
+    };
+  }, [view, cleanMode]);
+
   const handlePickFile = async () => {
     const selected = await invoke<string | null>("pick_file");
     if (selected) {
-      setFilePath(selected);
-      setReport(null);
-      setReportError("");
-      showToast("info", "Archivo seleccionado");
+      applyFilePath(selected);
     }
   };
 
   const handlePickDirectory = async () => {
     const selected = await invoke<string | null>("pick_directory");
     if (selected) {
-      setDirPath(selected);
-      setDirSummary(null);
-      setCleanup(CLEANUP_EMPTY);
-      showToast("info", "Directorio seleccionado");
+      applyDirectoryPath(selected);
     }
   };
 
   const handlePickFiles = async () => {
     const selected = await invoke<string[] | null>("pick_files");
     if (selected && selected.length) {
-      setSelectedFiles(selected);
-      setFileSummary(null);
-      setCleanup(CLEANUP_EMPTY);
-      showToast("info", `${selected.length} archivos seleccionados`);
+      applyFiles(selected);
     }
   };
 
@@ -466,343 +437,68 @@ export default function App() {
   };
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark">FL</div>
-          <div>
-            <strong>FileLens</strong>
-            <span>Desktop</span>
-          </div>
-        </div>
-        <nav className="nav">
-          {NAV_ITEMS.map((item) => (
-            <button
-              key={item.id}
-              className={`nav-btn ${view === item.id ? "active" : ""}`}
-              onClick={() => setView(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </nav>
-        <div className="sidebar-footer">
-          <span className="status-dot" />
-          <span>{cleanup.running ? "Procesando" : "Listo"}</span>
-        </div>
-      </aside>
-
+    <AppShell>
+      <Sidebar items={NAV_ITEMS} active={view} onSelect={setView} running={cleanup.running} />
       <main className="main">
-        <header className="topbar">
-          <div>
-            <h1>{NAV_ITEMS.find((item) => item.id === view)?.label}</h1>
-            <p>Flujo principal</p>
-          </div>
-        </header>
-
+        <Topbar title={NAV_ITEMS.find((item) => item.id === view)?.label ?? ""} />
         <section className="content">
-          {view === "analyze" && (
-            <div className="sheet">
-              <div className="section">
-                <div className="section-row">
-                  <div>
-                    <span className="label">Archivo</span>
-                    <div className="path-box">{filePath || "Ningun archivo seleccionado"}</div>
-                  </div>
-                  <button className="secondary" onClick={handlePickFile}>Explorar</button>
-                </div>
-                <div className="section-row">
-                  <label className="toggle">
-                    <input
-                      type="checkbox"
-                      checked={includeHash}
-                      onChange={() => setIncludeHash((prev) => !prev)}
-                    />
-                    <span>Calcular hashes (MD5 + SHA-256)</span>
-                  </label>
-                  <button className="primary" onClick={handleAnalyze} disabled={busy.analyze}>
-                    {busy.analyze ? "Analizando..." : "Analizar"}
-                  </button>
-                </div>
-                {reportError && <p className="inline-error">{reportError}</p>}
-              </div>
-
-              <div className="section">
-                <span className="label">Tipo detectado</span>
-                <div className="meta-inline">
-                  <span>{typeEntry?.value || "Archivo"}</span>
-                  <span>{filePath.split(".").pop()?.toUpperCase() || "-"}</span>
-                  <span className="muted">{mimeEntry?.value || "MIME no disponible"}</span>
-                  <span className="muted">{getEntry(report, "Tamaño")?.value || ""}</span>
-                </div>
-              </div>
-
-              <div className="section">
-                <span className="label">Metadata encontrada</span>
-                {report ? (
-                  <div className="meta-list">
-                    {systemEntries.map((entry, index) => (
-                      <div key={`${entry.label}-${index}`} className="meta-row">
-                        <span>{entry.label}</span>
-                        <span className="meta-value">{entry.value}</span>
-                      </div>
-                    ))}
-                    {report.internal.map((section) => (
-                      <div key={section.title} className="meta-group">
-                        <div className="section-title">{section.title}</div>
-                        {section.entries.map((entry, index) => (
-                          <div key={`${section.title}-${index}`} className="meta-row">
-                            <span>{entry.label}</span>
-                            <span className="meta-value">{entry.value}</span>
-                          </div>
-                        ))}
-                        {section.notice && (
-                          <div className={toneClass(section.notice.level)}>
-                            {section.notice.message}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                    {report.risks.length > 0 && (
-                      <div className="meta-group">
-                        <div className="section-title">Riesgos</div>
-                        {report.risks.map((entry, index) => (
-                          <div key={`risk-${index}`} className="meta-row">
-                            <span>{entry.label}</span>
-                            <span className="meta-value">{entry.value}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <p className="muted">Ejecuta el analisis para ver los resultados.</p>
-                )}
-              </div>
-
-              <div className="section">
-                <span className="label">Acciones sobre metadata</span>
-                <div className="section-row">
-                  <button className="danger" onClick={handleRemoveMetadata} disabled={busy.remove || !report}>
-                    {busy.remove ? "Eliminando..." : "Eliminar metadata"}
-                  </button>
-                  {!isOffice && <span className="muted">Edicion disponible solo para Office.</span>}
-                </div>
-                {isOffice && (
-                  <div className="edit-grid">
-                    {Object.entries(OFFICE_FIELD_LABELS).map(([fieldKey, label]) => (
-                      <div key={fieldKey} className="edit-row">
-                        <label className="field">
-                          <span>{label}</span>
-                          <input
-                            value={officeValues[fieldKey as OfficeField]}
-                            onChange={(event) =>
-                              setOfficeValues((prev) => ({
-                                ...prev,
-                                [fieldKey]: event.target.value
-                              }))
-                            }
-                            placeholder="(vacio)"
-                          />
-                        </label>
-                        <button
-                          className="secondary"
-                          onClick={() => handleEditField(fieldKey as OfficeField)}
-                          disabled={busy.edit || !report}
-                        >
-                          Guardar
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {view === "clean" && (
-            <div className="sheet">
-              <div className="section">
-                <span className="label">Modo</span>
-                <div className="segmented">
-                  <button
-                    className={cleanMode === "directory" ? "active" : ""}
-                    onClick={() => setCleanMode("directory")}
-                  >
-                    Directorio
-                  </button>
-                  <button
-                    className={cleanMode === "files" ? "active" : ""}
-                    onClick={() => setCleanMode("files")}
-                  >
-                    Archivos
-                  </button>
-                </div>
-              </div>
-
-              {cleanMode === "directory" ? (
-                <div className="section">
-                  <div className="section-row">
-                    <div>
-                      <span className="label">Directorio</span>
-                      <div className="path-box">{dirPath || "Ningun directorio seleccionado"}</div>
-                    </div>
-                    <button className="secondary" onClick={handlePickDirectory}>Explorar</button>
-                  </div>
-                  <div className="section-row">
-                    <label className="toggle">
-                      <input
-                        type="checkbox"
-                        checked={recursive}
-                        onChange={() => setRecursive((prev) => !prev)}
-                      />
-                      <span>Incluir subdirectorios</span>
-                    </label>
-                    <div className="segmented">
-                      <button
-                        className={filter === "all" ? "active" : ""}
-                        onClick={() => setFilter("all")}
-                      >
-                        Todos
-                      </button>
-                      <button
-                        className={filter === "images" ? "active" : ""}
-                        onClick={() => setFilter("images")}
-                      >
-                        Imagenes
-                      </button>
-                      <button
-                        className={filter === "office" ? "active" : ""}
-                        onClick={() => setFilter("office")}
-                      >
-                        Office
-                      </button>
-                    </div>
-                  </div>
-                  <div className="section-row">
-                    <button className="secondary" onClick={handleAnalyzeDirectory} disabled={busy.dirAnalyze}>
-                      {busy.dirAnalyze ? "Analizando..." : "Analizar"}
-                    </button>
-                    <button className="primary" onClick={handleStartCleanup} disabled={busy.cleanup}>
-                      {busy.cleanup ? "Procesando..." : "Limpiar"}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="section">
-                  <div className="section-row">
-                    <div>
-                      <span className="label">Archivos</span>
-                      <div className="path-box">
-                        {selectedFiles.length ? `${selectedFiles.length} archivos seleccionados` : "Ningun archivo seleccionado"}
-                      </div>
-                    </div>
-                    <button className="secondary" onClick={handlePickFiles}>Explorar</button>
-                  </div>
-                  <div className="section-row">
-                    <div className="segmented">
-                      <button
-                        className={filter === "all" ? "active" : ""}
-                        onClick={() => setFilter("all")}
-                      >
-                        Todos
-                      </button>
-                      <button
-                        className={filter === "images" ? "active" : ""}
-                        onClick={() => setFilter("images")}
-                      >
-                        Imagenes
-                      </button>
-                      <button
-                        className={filter === "office" ? "active" : ""}
-                        onClick={() => setFilter("office")}
-                      >
-                        Office
-                      </button>
-                    </div>
-                  </div>
-                  {selectedFiles.length > 0 && (
-                    <div className="file-list">
-                      {selectedFiles.slice(0, 3).map((file) => (
-                        <div key={file} className="file-item">{file}</div>
-                      ))}
-                      {selectedFiles.length > 3 && (
-                        <div className="file-item muted">+ {selectedFiles.length - 3} mas</div>
-                      )}
-                    </div>
-                  )}
-                  <div className="section-row">
-                    <button className="secondary" onClick={handleAnalyzeFiles} disabled={busy.fileAnalyze}>
-                      {busy.fileAnalyze ? "Analizando..." : "Analizar"}
-                    </button>
-                    <button className="primary" onClick={handleStartCleanup} disabled={busy.cleanup}>
-                      {busy.cleanup ? "Procesando..." : "Limpiar"}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              <div className="section">
-                <span className="label">Desglose</span>
-                {(cleanMode === "directory" ? dirSummary : fileSummary) ? (
-                  <div className="summary">
-                    <div className="summary-row">
-                      <span>Total</span>
-                      <strong>{(cleanMode === "directory" ? dirSummary : fileSummary)?.total_files}</strong>
-                    </div>
-                    <div className="summary-row">
-                      <span>Imagenes</span>
-                      <strong>{(cleanMode === "directory" ? dirSummary : fileSummary)?.images_count}</strong>
-                    </div>
-                    <div className="summary-row">
-                      <span>Office</span>
-                      <strong>{(cleanMode === "directory" ? dirSummary : fileSummary)?.office_count}</strong>
-                    </div>
-                    <div className="summary-section">
-                      <span className="label">Extensiones principales</span>
-                      {extensionCounts.map(([ext, count]) => (
-                        <div key={ext} className="summary-row">
-                          <span>{ext}</span>
-                          <strong>{count}</strong>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <p className="muted">Ejecuta el analisis para ver el desglose.</p>
-                )}
-              </div>
-
-              <div className="section">
-                <span className="label">Progreso</span>
-                <div className="progress">
-                  <div
-                    className="progress-bar"
-                    style={{
-                      width: cleanup.total ? `${Math.round((cleanup.index / cleanup.total) * 100)}%` : "0%"
-                    }}
-                  />
-                </div>
-                <div className="summary-row">
-                  <span>Actual</span>
-                  <span className="mono">{cleanup.current || "-"}</span>
-                </div>
-                <div className="summary-row">
-                  <span>OK / ERR</span>
-                  <strong>{cleanup.successes} / {cleanup.failures}</strong>
-                </div>
-                {cleanup.lastError && <p className="inline-error">Ultimo error: {cleanup.lastError}</p>}
-              </div>
-            </div>
+          {view === "analyze" ? (
+            <AnalyzeView
+              filePath={filePath}
+              includeHash={includeHash}
+              report={report}
+              reportError={reportError}
+              systemEntries={systemEntries}
+              typeEntry={typeEntry}
+              mimeEntry={mimeEntry}
+              isOffice={isOffice}
+              officeValues={officeValues}
+              busy={{ analyze: busy.analyze, remove: busy.remove, edit: busy.edit }}
+              dropActive={dropTarget === "analyze-file"}
+              dropHandlers={dropZoneHandlers("analyze-file")}
+              onPickFile={handlePickFile}
+              onToggleHash={() => setIncludeHash((prev) => !prev)}
+              onAnalyze={handleAnalyze}
+              onRemoveMetadata={handleRemoveMetadata}
+              onEditField={handleEditField}
+              onOfficeValueChange={(field, value) =>
+                setOfficeValues((prev) => ({
+                  ...prev,
+                  [field]: value
+                }))
+              }
+            />
+          ) : (
+            <CleanView
+              cleanMode={cleanMode}
+              dirPath={dirPath}
+              selectedFiles={selectedFiles}
+              recursive={recursive}
+              filter={filter}
+              dirSummary={dirSummary}
+              fileSummary={fileSummary}
+              extensionCounts={extensionCounts}
+              cleanup={cleanup}
+              busy={{
+                dirAnalyze: busy.dirAnalyze,
+                fileAnalyze: busy.fileAnalyze,
+                cleanup: busy.cleanup
+              }}
+              dropTarget={dropTarget}
+              dropHandlers={dropZoneHandlers}
+              onSetCleanMode={setCleanMode}
+              onPickDirectory={handlePickDirectory}
+              onPickFiles={handlePickFiles}
+              onToggleRecursive={() => setRecursive((prev) => !prev)}
+              onSetFilter={setFilter}
+              onAnalyzeDirectory={handleAnalyzeDirectory}
+              onAnalyzeFiles={handleAnalyzeFiles}
+              onStartCleanup={handleStartCleanup}
+            />
           )}
         </section>
       </main>
-
-      {toast && (
-        <div className={`toast toast--${toast.kind}`}>
-          <span>{toast.message}</span>
-        </div>
-      )}
-    </div>
+      {toast && <Toast toast={toast} />}
+    </AppShell>
   );
 }
