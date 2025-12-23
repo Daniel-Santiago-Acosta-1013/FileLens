@@ -1,5 +1,6 @@
+use filelens::metadata::export::{export_metadata_report, parse_export_format, ExportFormat};
 use filelens::metadata::renderer::build_report;
-use filelens::metadata::report::MetadataOptions;
+use filelens::metadata::report::{MetadataOptions, MetadataReport};
 use filelens::metadata_editor::{
     analyze_directory as analyze_directory_core, analyze_files as analyze_files_core,
     apply_office_metadata_edit, collect_candidate_files, DirectoryAnalysisSummary,
@@ -9,7 +10,11 @@ use filelens::search::{find_directories_quiet, find_files_quiet};
 use rfd::FileDialog;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use std::time::Duration;
 use tauri::Emitter;
+
+const CLEANUP_FILE_TIMEOUT_SECS: u64 = 20;
 
 #[derive(Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -105,6 +110,36 @@ fn pick_files() -> Option<Vec<String>> {
 }
 
 #[tauri::command]
+fn export_report(
+    report: MetadataReport,
+    format: String,
+    suggested_name: Option<String>,
+) -> Result<Option<String>, String> {
+    let format = parse_export_format(&format)?;
+    let suggested_name = suggested_name
+        .and_then(|name| {
+            let trimmed = name.trim().to_string();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
+        })
+        .unwrap_or_else(|| default_export_name(&report, format));
+
+    let mut dialog = FileDialog::new();
+    dialog = dialog.add_filter(format.label(), &[format.extension()]);
+    dialog = dialog.set_file_name(&suggested_name);
+    let Some(path) = dialog.save_file() else {
+        return Ok(None);
+    };
+
+    let path = ensure_extension(path, format.extension());
+    export_metadata_report(&report, format, &path)?;
+    Ok(Some(path.display().to_string()))
+}
+
+#[tauri::command]
 fn start_cleanup(
     app: tauri::AppHandle,
     path: String,
@@ -121,55 +156,7 @@ fn start_cleanup(
 
     files.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
 
-    let app_handle = app.clone();
-    std::thread::spawn(move || {
-        let total = files.len();
-    let _ = app_handle.emit(
-        "cleanup://progress",
-        CleanupProgress::Started { total },
-    );
-
-        let mut successes = 0_usize;
-        let mut failures = 0_usize;
-
-        for (index, path) in files.into_iter().enumerate() {
-            let _ = app_handle.emit(
-                "cleanup://progress",
-                CleanupProgress::Processing {
-                    index: index + 1,
-                    total,
-                    path: path.display().to_string(),
-                },
-            );
-
-            match remove_all_metadata(&path) {
-                Ok(()) => {
-                    successes += 1;
-                    let _ = app_handle.emit(
-                        "cleanup://progress",
-                        CleanupProgress::Success {
-                            path: path.display().to_string(),
-                        },
-                    );
-                }
-                Err(error) => {
-                    failures += 1;
-                    let _ = app_handle.emit(
-                        "cleanup://progress",
-                        CleanupProgress::Failure {
-                            path: path.display().to_string(),
-                            error,
-                        },
-                    );
-                }
-            }
-        }
-
-        let _ = app_handle.emit(
-            "cleanup://progress",
-            CleanupProgress::Finished { successes, failures },
-        );
-    });
+    run_cleanup_thread(app.clone(), files);
 
     Ok(())
 }
@@ -190,7 +177,12 @@ fn start_cleanup_files(
 
     files.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
 
-    let app_handle = app.clone();
+    run_cleanup_thread(app.clone(), files);
+
+    Ok(())
+}
+
+fn run_cleanup_thread(app_handle: tauri::AppHandle, files: Vec<PathBuf>) {
     std::thread::spawn(move || {
         let total = files.len();
         let _ = app_handle.emit(
@@ -200,25 +192,25 @@ fn start_cleanup_files(
 
         let mut successes = 0_usize;
         let mut failures = 0_usize;
+        let timeout = Duration::from_secs(CLEANUP_FILE_TIMEOUT_SECS);
 
         for (index, path) in files.into_iter().enumerate() {
+            let display = path.display().to_string();
             let _ = app_handle.emit(
                 "cleanup://progress",
                 CleanupProgress::Processing {
                     index: index + 1,
                     total,
-                    path: path.display().to_string(),
+                    path: display.clone(),
                 },
             );
 
-            match remove_all_metadata(&path) {
+            match remove_all_metadata_with_timeout(path, timeout) {
                 Ok(()) => {
                     successes += 1;
                     let _ = app_handle.emit(
                         "cleanup://progress",
-                        CleanupProgress::Success {
-                            path: path.display().to_string(),
-                        },
+                        CleanupProgress::Success { path: display },
                     );
                 }
                 Err(error) => {
@@ -226,7 +218,7 @@ fn start_cleanup_files(
                     let _ = app_handle.emit(
                         "cleanup://progress",
                         CleanupProgress::Failure {
-                            path: path.display().to_string(),
+                            path: display,
                             error,
                         },
                     );
@@ -239,8 +231,25 @@ fn start_cleanup_files(
             CleanupProgress::Finished { successes, failures },
         );
     });
+}
 
-    Ok(())
+fn remove_all_metadata_with_timeout(path: PathBuf, timeout: Duration) -> Result<(), String> {
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let result = remove_all_metadata(&path);
+        let _ = sender.send(result);
+    });
+
+    match receiver.recv_timeout(timeout) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(format!(
+            "Tiempo de espera excedido ({} s)",
+            timeout.as_secs()
+        )),
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            Err("No se pudo completar la limpieza".to_string())
+        }
+    }
 }
 
 fn parse_filter(input: &str) -> Result<DirectoryFilter, String> {
@@ -262,6 +271,7 @@ fn main() {
             search_directories,
             remove_metadata,
             edit_office_metadata,
+            export_report,
             start_cleanup,
             start_cleanup_files,
             pick_file,
@@ -270,4 +280,45 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn ensure_extension(path: PathBuf, extension: &str) -> PathBuf {
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some(ext) if ext.eq_ignore_ascii_case(extension) => path,
+        _ => path.with_extension(extension),
+    }
+}
+
+fn default_export_name(report: &MetadataReport, format: ExportFormat) -> String {
+    let base = report
+        .system
+        .iter()
+        .find(|entry| entry.label.eq_ignore_ascii_case("Nombre"))
+        .and_then(|entry| derive_base_name(&entry.value))
+        .or_else(|| {
+            report
+                .system
+                .iter()
+                .find(|entry| entry.label.eq_ignore_ascii_case("Ruta ingresada"))
+                .and_then(|entry| derive_base_name(&entry.value))
+        })
+        .unwrap_or_else(|| "archivo".to_string());
+
+    let base = if base.to_lowercase().ends_with("-metadata") {
+        base
+    } else {
+        format!("{base}-metadata")
+    };
+
+    format!("{}.{}", base, format.extension())
+}
+
+fn derive_base_name(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let path = Path::new(trimmed);
+    let stem = path.file_stem().or_else(|| path.file_name())?;
+    Some(stem.to_string_lossy().into_owned())
 }

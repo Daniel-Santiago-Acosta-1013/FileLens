@@ -2,6 +2,7 @@ import type { HTMLAttributes } from "react";
 import DropZone from "../../components/molecules/DropZone/DropZone";
 import Note from "../../components/molecules/Note/Note";
 import MetaRow from "../../components/molecules/MetaRow/MetaRow";
+import SegmentedControl from "../../components/molecules/SegmentedControl/SegmentedControl";
 import Button from "../../components/atoms/Button/Button";
 import Toggle from "../../components/atoms/Toggle/Toggle";
 import Section from "../../components/layout/Section/Section";
@@ -9,7 +10,7 @@ import Sheet from "../../components/layout/Sheet/Sheet";
 import { OFFICE_FIELD_LABELS } from "../../constants";
 import { getEntry } from "../../utils/metadata";
 import type { MetadataReport, ReportEntry } from "../../types/metadata";
-import type { OfficeField } from "../../types/ui";
+import type { ExportFormat, OfficeField } from "../../types/ui";
 import "./AnalyzeView.css";
 
 type AnalyzeViewProps = {
@@ -22,6 +23,8 @@ type AnalyzeViewProps = {
   mimeEntry: ReportEntry | null;
   isOffice: boolean;
   officeValues: Record<OfficeField, string>;
+  exportFormat: ExportFormat;
+  exporting: boolean;
   busy: {
     analyze: boolean;
     remove: boolean;
@@ -35,6 +38,8 @@ type AnalyzeViewProps = {
   onRemoveMetadata: () => void;
   onEditField: (field: OfficeField) => void;
   onOfficeValueChange: (field: OfficeField, value: string) => void;
+  onExportFormatChange: (value: ExportFormat) => void;
+  onExport: () => void;
 };
 
 const fileIcon = (
@@ -68,6 +73,8 @@ export default function AnalyzeView({
   mimeEntry,
   isOffice,
   officeValues,
+  exportFormat,
+  exporting,
   busy,
   dropActive,
   dropHandlers,
@@ -76,7 +83,9 @@ export default function AnalyzeView({
   onAnalyze,
   onRemoveMetadata,
   onEditField,
-  onOfficeValueChange
+  onOfficeValueChange,
+  onExportFormatChange,
+  onExport
 }: AnalyzeViewProps) {
   const extension = filePath.split(".").pop()?.toUpperCase() || "-";
   const sizeEntry = getEntry(report, "Tamaño");
@@ -107,17 +116,19 @@ export default function AnalyzeView({
         {reportError && <p className="inline-error">{reportError}</p>}
       </Section>
 
-      <Section label="Tipo detectado">
-        <div className="meta-inline">
-          <span>{typeEntry?.value || "Archivo"}</span>
-          <span>{extension}</span>
-          <span className="muted">{mimeEntry?.value || "MIME no disponible"}</span>
-          <span className="muted">{sizeEntry?.value || ""}</span>
-        </div>
-      </Section>
+      {report && (
+        <Section label="Tipo detectado">
+          <div className="meta-inline">
+            <span>{typeEntry?.value || "Archivo"}</span>
+            <span>{extension}</span>
+            <span className="muted">{mimeEntry?.value || "MIME no disponible"}</span>
+            <span className="muted">{sizeEntry?.value || ""}</span>
+          </div>
+        </Section>
+      )}
 
-      <Section label="Metadata encontrada">
-        {report ? (
+      {report && (
+        <Section label="Metadata encontrada">
           <div className="meta-list">
             {systemEntries.map((entry, index) => (
               <MetaRow key={`${entry.label}-${index}`} label={entry.label} value={entry.value} />
@@ -140,42 +151,64 @@ export default function AnalyzeView({
               </div>
             )}
           </div>
-        ) : (
-          <p className="muted">Ejecuta el analisis para ver los resultados.</p>
-        )}
-      </Section>
+        </Section>
+      )}
 
-      <Section label="Acciones sobre metadata">
-        <div className="section-row">
-          <Button variant="danger" onClick={onRemoveMetadata} disabled={busy.remove || !report}>
-            {busy.remove ? "Eliminando..." : "Eliminar metadata"}
-          </Button>
-          {!isOffice && <span className="muted">Edicion disponible solo para Office.</span>}
-        </div>
-        {isOffice && (
-          <div className="edit-grid">
-            {Object.entries(OFFICE_FIELD_LABELS).map(([fieldKey, label]) => (
-              <div key={fieldKey} className="edit-row">
-                <label className="field">
-                  <span>{label}</span>
-                  <input
-                    value={officeValues[fieldKey as OfficeField]}
-                    onChange={(event) => onOfficeValueChange(fieldKey as OfficeField, event.target.value)}
-                    placeholder="(vacio)"
-                  />
-                </label>
-                <Button
-                  variant="secondary"
-                  onClick={() => onEditField(fieldKey as OfficeField)}
-                  disabled={busy.edit || !report}
-                >
-                  Guardar
-                </Button>
-              </div>
-            ))}
+      {report && (
+        <Section label="Acciones sobre metadata">
+          <div className="section-row">
+            <Button variant="danger" onClick={onRemoveMetadata} disabled={busy.remove || !report}>
+              {busy.remove ? "Eliminando..." : "Eliminar metadata"}
+            </Button>
+            {!isOffice && <span className="muted">Edicion disponible solo para Office.</span>}
           </div>
-        )}
-      </Section>
+          {isOffice && (
+            <div className="edit-grid">
+              {Object.entries(OFFICE_FIELD_LABELS).map(([fieldKey, label]) => (
+                <div key={fieldKey} className="edit-row">
+                  <label className="field">
+                    <span>{label}</span>
+                    <input
+                      value={officeValues[fieldKey as OfficeField]}
+                      onChange={(event) =>
+                        onOfficeValueChange(fieldKey as OfficeField, event.target.value)
+                      }
+                      placeholder="(vacio)"
+                    />
+                  </label>
+                  <Button
+                    variant="secondary"
+                    onClick={() => onEditField(fieldKey as OfficeField)}
+                    disabled={busy.edit || !report}
+                  >
+                    Guardar
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </Section>
+      )}
+
+      {report && (
+        <Section label="Exportar metadata">
+          <div className="section-row export-row">
+            <SegmentedControl
+              value={exportFormat}
+              options={[
+                { id: "json", label: "JSON" },
+                { id: "txt", label: "TXT" },
+                { id: "xlsx", label: "Excel" },
+                { id: "pdf", label: "PDF" }
+              ]}
+              onChange={onExportFormatChange}
+            />
+            <Button variant="secondary" onClick={onExport} disabled={exporting || !report}>
+              {exporting ? "Exportando..." : "Exportar"}
+            </Button>
+          </div>
+        </Section>
+      )}
     </Sheet>
   );
 }

@@ -7,6 +7,7 @@ const MAX_XMP_VALUE_LEN: usize = 2048;
 pub struct XmpMetadata {
     pub entries: Vec<ReportEntry>,
     pub risks: Vec<ReportEntry>,
+    pub gps_position: Option<String>,
 }
 
 pub fn parse_xmp_metadata(packet: &str) -> Option<XmpMetadata> {
@@ -16,6 +17,7 @@ pub fn parse_xmp_metadata(packet: &str) -> Option<XmpMetadata> {
     let mut metadata = XmpMetadata {
         entries: Vec::new(),
         risks: Vec::new(),
+        gps_position: None,
     };
     let mut seen = HashSet::new();
 
@@ -125,6 +127,41 @@ pub fn parse_xmp_metadata(packet: &str) -> Option<XmpMetadata> {
             keys: &["photoshop:Credit", "photoshop:Source", "xmpMM:DerivedFrom"],
             sensitive: false,
         },
+        XmpFieldSpec {
+            label: "GPS Latitud",
+            keys: &["exif:GPSLatitude", "GPSLatitude"],
+            sensitive: true,
+        },
+        XmpFieldSpec {
+            label: "GPS Longitud",
+            keys: &["exif:GPSLongitude", "GPSLongitude"],
+            sensitive: true,
+        },
+        XmpFieldSpec {
+            label: "GPS Altitud",
+            keys: &["exif:GPSAltitude", "GPSAltitude"],
+            sensitive: true,
+        },
+        XmpFieldSpec {
+            label: "GPS Velocidad",
+            keys: &["exif:GPSSpeed", "GPSSpeed"],
+            sensitive: true,
+        },
+        XmpFieldSpec {
+            label: "GPS Rumbo",
+            keys: &["exif:GPSTrack", "GPSTrack"],
+            sensitive: true,
+        },
+        XmpFieldSpec {
+            label: "GPS Dirección",
+            keys: &["exif:GPSImgDirection", "GPSImgDirection"],
+            sensitive: true,
+        },
+        XmpFieldSpec {
+            label: "GPS Datum",
+            keys: &["exif:GPSMapDatum", "GPSMapDatum"],
+            sensitive: true,
+        },
     ];
 
     for spec in specs {
@@ -143,6 +180,8 @@ pub fn parse_xmp_metadata(packet: &str) -> Option<XmpMetadata> {
             metadata.risks.push(ReportEntry::warning(spec.label, value));
         }
     }
+
+    metadata.gps_position = build_gps_position(&root);
 
     Some(metadata)
 }
@@ -199,6 +238,116 @@ fn collect_values(root: &Element, keys: &[&str]) -> String {
         }
     }
     values.join(", ")
+}
+
+fn build_gps_position(root: &Element) -> Option<String> {
+    let lat = first_value(root, &["exif:GPSLatitude", "GPSLatitude"])?;
+    let lon = first_value(root, &["exif:GPSLongitude", "GPSLongitude"])?;
+    let lat_ref = first_value(root, &["exif:GPSLatitudeRef", "GPSLatitudeRef"]);
+    let lon_ref = first_value(root, &["exif:GPSLongitudeRef", "GPSLongitudeRef"]);
+
+    let lat_formatted = format_gps_value(&lat, lat_ref.as_deref(), true)?;
+    let lon_formatted = format_gps_value(&lon, lon_ref.as_deref(), false)?;
+
+    Some(format!("{lat_formatted}, {lon_formatted}"))
+}
+
+fn first_value(root: &Element, keys: &[&str]) -> Option<String> {
+    let mut values = Vec::new();
+    for key in keys {
+        collect_values_for_key(root, key, &mut values);
+    }
+    values
+        .into_iter()
+        .find(|value| !value.trim().is_empty())
+}
+
+fn format_gps_value(value: &str, ref_override: Option<&str>, is_lat: bool) -> Option<String> {
+    let mut reference = ref_override
+        .and_then(find_ref_char)
+        .or_else(|| find_ref_char(value));
+
+    let (deg, min, sec) = match extract_numbers(value).as_slice() {
+        [deg, min, sec, ..] => (*deg, *min, *sec),
+        [decimal] => {
+            if *decimal < 0.0 && reference.is_none() {
+                reference = Some(if is_lat { 'S' } else { 'W' });
+            }
+            decimal_to_dms(*decimal)
+        }
+        _ => return None,
+    };
+
+    let (deg, min, sec) = normalize_dms(deg.abs(), min.abs(), sec.abs());
+    let deg_label = format_decimal(deg, 0);
+    let min_label = format_decimal(min, 0);
+    let sec_label = format_decimal(sec, 2);
+    let suffix = reference.map(|c| format!(" {c}")).unwrap_or_default();
+    Some(format!("{deg_label} grados {min_label}' {sec_label}\"{suffix}"))
+}
+
+fn decimal_to_dms(value: f64) -> (f64, f64, f64) {
+    let abs = value.abs();
+    let deg = abs.floor();
+    let minutes_total = (abs - deg) * 60.0;
+    let min = minutes_total.floor();
+    let sec = (minutes_total - min) * 60.0;
+    (deg, min, sec)
+}
+
+fn normalize_dms(degrees: f64, minutes: f64, seconds: f64) -> (f64, f64, f64) {
+    let mut deg = degrees;
+    let mut min = minutes;
+    let mut sec = seconds;
+    if sec >= 60.0 {
+        min += (sec / 60.0).floor();
+        sec = sec % 60.0;
+    }
+    if min >= 60.0 {
+        deg += (min / 60.0).floor();
+        min = min % 60.0;
+    }
+    (deg, min, sec)
+}
+
+fn format_decimal(value: f64, decimals: usize) -> String {
+    let mut out = format!("{:.*}", decimals, value);
+    if out.contains('.') {
+        out = out.replace('.', ",");
+    }
+    out
+}
+
+fn extract_numbers(value: &str) -> Vec<f64> {
+    let mut numbers = Vec::new();
+    let mut buffer = String::new();
+    for ch in value.chars() {
+        if ch.is_ascii_digit() || ch == '.' || ch == ',' || ch == '-' {
+            if ch == ',' {
+                buffer.push('.');
+            } else {
+                buffer.push(ch);
+            }
+        } else if !buffer.is_empty() {
+            if let Ok(parsed) = buffer.parse::<f64>() {
+                numbers.push(parsed);
+            }
+            buffer.clear();
+        }
+    }
+    if !buffer.is_empty() {
+        if let Ok(parsed) = buffer.parse::<f64>() {
+            numbers.push(parsed);
+        }
+    }
+    numbers
+}
+
+fn find_ref_char(value: &str) -> Option<char> {
+    value.chars().find_map(|ch| match ch.to_ascii_uppercase() {
+        'N' | 'S' | 'E' | 'W' => Some(ch.to_ascii_uppercase()),
+        _ => None,
+    })
 }
 
 fn collect_values_for_key(root: &Element, key: &str, values: &mut Vec<String>) {

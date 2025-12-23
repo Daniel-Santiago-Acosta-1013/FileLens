@@ -306,6 +306,8 @@ fn append_exif_entries(
     exif: &exif::Exif,
 ) -> bool {
     let mut has_entries = false;
+    let gps_lat = gps_dms_from_exif(exif, Tag::GPSLatitude, Tag::GPSLatitudeRef);
+    let gps_lon = gps_dms_from_exif(exif, Tag::GPSLongitude, Tag::GPSLongitudeRef);
     let byte_order = if exif.little_endian() {
         "Little-endian (Intel, II)"
     } else {
@@ -369,7 +371,29 @@ fn append_exif_entries(
         }
     }
 
-    if let Some(value) = gps_value(exif, Tag::GPSLatitude, Tag::GPSLatitudeRef)
+    if let (Some(lat), Some(lon)) = (&gps_lat, &gps_lon) {
+        let position = format!("{}, {}", format_gps_dms(lat), format_gps_dms(lon));
+        if push_entry_unique(
+            section,
+            seen,
+            ReportEntry::warning("Posición GPS", &position),
+        ) {
+            risks.push(ReportEntry::warning("Posición GPS", position));
+            has_entries = true;
+        }
+    }
+
+    if let Some(lat) = gps_lat {
+        let value = format_gps_dms(&lat);
+        if push_entry_unique(
+            section,
+            seen,
+            ReportEntry::warning("GPS Latitud", &value),
+        ) {
+            risks.push(ReportEntry::warning("GPS Latitud", value));
+            has_entries = true;
+        }
+    } else if let Some(value) = gps_value(exif, Tag::GPSLatitude, Tag::GPSLatitudeRef)
         && push_entry_unique(
             section,
             seen,
@@ -379,7 +403,18 @@ fn append_exif_entries(
         risks.push(ReportEntry::warning("GPS Latitud", value));
         has_entries = true;
     }
-    if let Some(value) = gps_value(exif, Tag::GPSLongitude, Tag::GPSLongitudeRef)
+
+    if let Some(lon) = gps_lon {
+        let value = format_gps_dms(&lon);
+        if push_entry_unique(
+            section,
+            seen,
+            ReportEntry::warning("GPS Longitud", &value),
+        ) {
+            risks.push(ReportEntry::warning("GPS Longitud", value));
+            has_entries = true;
+        }
+    } else if let Some(value) = gps_value(exif, Tag::GPSLongitude, Tag::GPSLongitudeRef)
         && push_entry_unique(
             section,
             seen,
@@ -444,12 +479,108 @@ fn get_exif_field(exif: &exif::Exif, tag: Tag) -> Option<&exif::Field> {
 
 fn gps_value(exif: &exif::Exif, value_tag: Tag, ref_tag: Tag) -> Option<String> {
     let field = exif.get_field(value_tag, IFD_GPS)?;
-    let ref_field = exif.get_field(ref_tag, IFD_GPS)?;
-    Some(format!(
-        "{} {}",
-        field.display_value(),
-        ref_field.display_value()
-    ))
+    let value = field.display_value().to_string();
+    if let Some(ref_field) = exif.get_field(ref_tag, IFD_GPS) {
+        Some(format!("{} {}", value, ref_field.display_value()))
+    } else {
+        Some(value)
+    }
+}
+
+struct GpsDms {
+    degrees: f64,
+    minutes: f64,
+    seconds: f64,
+    reference: Option<char>,
+}
+
+fn gps_dms_from_exif(
+    exif: &exif::Exif,
+    value_tag: Tag,
+    ref_tag: Tag,
+) -> Option<GpsDms> {
+    use exif::Value;
+
+    let field = exif.get_field(value_tag, IFD_GPS)?;
+    let (degrees, minutes, seconds) = match &field.value {
+        Value::Rational(values) => gps_rational_triplet(values)?,
+        Value::SRational(values) => gps_srational_triplet(values)?,
+        _ => return None,
+    };
+    let reference = exif
+        .get_field(ref_tag, IFD_GPS)
+        .and_then(|field| gps_ref_char(&field.display_value().to_string()));
+
+    Some(GpsDms {
+        degrees,
+        minutes,
+        seconds,
+        reference,
+    })
+}
+
+fn gps_rational_triplet(values: &[exif::Rational]) -> Option<(f64, f64, f64)> {
+    if values.len() < 3 {
+        return None;
+    }
+    let degrees = values[0].num as f64 / values[0].denom as f64;
+    let minutes = values[1].num as f64 / values[1].denom as f64;
+    let seconds = values[2].num as f64 / values[2].denom as f64;
+    Some((degrees, minutes, seconds))
+}
+
+fn gps_srational_triplet(values: &[exif::SRational]) -> Option<(f64, f64, f64)> {
+    if values.len() < 3 {
+        return None;
+    }
+    let degrees = values[0].num as f64 / values[0].denom as f64;
+    let minutes = values[1].num as f64 / values[1].denom as f64;
+    let seconds = values[2].num as f64 / values[2].denom as f64;
+    Some((degrees, minutes, seconds))
+}
+
+fn gps_ref_char(value: &str) -> Option<char> {
+    value
+        .chars()
+        .find_map(|ch| match ch.to_ascii_uppercase() {
+            'N' | 'S' | 'E' | 'W' => Some(ch.to_ascii_uppercase()),
+            _ => None,
+        })
+}
+
+fn format_gps_dms(coord: &GpsDms) -> String {
+    let (degrees, minutes, seconds) = normalize_dms(coord.degrees, coord.minutes, coord.seconds);
+    let deg_label = format_decimal(degrees.abs(), 0);
+    let min_label = format_decimal(minutes.abs(), 0);
+    let sec_label = format_decimal(seconds.abs(), 2);
+    let reference = coord
+        .reference
+        .map(|c| format!(" {}", c))
+        .unwrap_or_default();
+    format!("{deg_label} grados {min_label}' {sec_label}\"{reference}")
+}
+
+fn normalize_dms(degrees: f64, minutes: f64, seconds: f64) -> (f64, f64, f64) {
+    let mut deg = degrees;
+    let mut min = minutes;
+    let mut sec = seconds;
+    if sec >= 60.0 {
+        min += (sec / 60.0).floor();
+        sec = sec % 60.0;
+    }
+    if min >= 60.0 {
+        deg += (min / 60.0).floor();
+        min = min % 60.0;
+    }
+    (deg, min, sec)
+}
+
+fn format_decimal(value: f64, decimals: usize) -> String {
+    let mut out = format!("{:.*}", decimals, value);
+    if out.contains('.') {
+        out = out.replace('.', ",");
+    }
+    out
 }
 
 fn read_image_dimensions(path: &Path) -> Option<(u32, u32)> {
@@ -655,6 +786,16 @@ fn append_xmp_entries(
         return false;
     };
     let mut has_entries = false;
+    if let Some(position) = metadata.gps_position {
+        if push_entry_unique(
+            section,
+            seen,
+            ReportEntry::warning("Posición GPS", &position),
+        ) {
+            risks.push(ReportEntry::warning("Posición GPS", position));
+            has_entries = true;
+        }
+    }
     for entry in metadata.entries {
         has_entries |= push_entry_unique(section, seen, entry);
     }

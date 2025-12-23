@@ -3,5 +3,6 @@
 mod hashing;
 mod mime;
 mod permissions;
+pub mod export;
 pub mod report;
 pub mod renderer;

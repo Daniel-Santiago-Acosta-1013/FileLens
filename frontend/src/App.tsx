@@ -17,6 +17,7 @@ import type { MetadataReport, ReportEntry } from "./types/metadata";
 import type {
   CleanMode,
   DropTarget,
+  ExportFormat,
   Filter,
   OfficeField,
   Toast as ToastType,
@@ -43,6 +44,7 @@ export default function App() {
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [recursive, setRecursive] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
+  const [exportFormat, setExportFormat] = useState<ExportFormat>("json");
   const [dirSummary, setDirSummary] = useState<DirectoryAnalysisSummary | null>(null);
   const [fileSummary, setFileSummary] = useState<DirectoryAnalysisSummary | null>(null);
   const [cleanup, setCleanup] = useState<CleanupState>(CLEANUP_EMPTY);
@@ -61,7 +63,8 @@ export default function App() {
     fileAnalyze: false,
     cleanup: false,
     remove: false,
-    edit: false
+    edit: false,
+    export: false
   });
 
   const systemEntries = useMemo(() => extractSystem(report), [report]);
@@ -463,6 +466,40 @@ export default function App() {
     }
   };
 
+  const handleExportReport = async () => {
+    if (!report) {
+      showToast("warning", "Analiza un archivo antes de exportar");
+      return;
+    }
+    const reportName = getEntry(report, "Nombre")?.value;
+    const pathName = filePath.split(/[\\/]/).pop() || "";
+    const rawName = (reportName || pathName || "archivo").trim();
+    const nameWithoutExt = rawName.replace(/\.[^.]+$/, "") || "archivo";
+    const baseName = nameWithoutExt.toLowerCase().endsWith("-metadata")
+      ? nameWithoutExt
+      : `${nameWithoutExt}-metadata`;
+    const suggestedName = `${baseName}.${exportFormat}`;
+
+    setBusy((prev) => ({ ...prev, export: true }));
+    try {
+      const savedPath = await invoke<string | null>("export_report", {
+        report,
+        format: exportFormat,
+        suggested_name: suggestedName
+      });
+      if (savedPath) {
+        showToast("success", `Exportado en ${savedPath}`);
+      }
+    } catch (error) {
+      const message = String(error);
+      if (!message.toLowerCase().includes("cancel")) {
+        showToast("error", `No se pudo exportar: ${message}`);
+      }
+    } finally {
+      setBusy((prev) => ({ ...prev, export: false }));
+    }
+  };
+
   const handleEditField = async (field: OfficeField) => {
     if (!filePath.trim()) {
       showToast("warning", "Selecciona un archivo");
@@ -509,6 +546,8 @@ export default function App() {
               mimeEntry={mimeEntry}
               isOffice={isOffice}
               officeValues={officeValues}
+              exportFormat={exportFormat}
+              exporting={busy.export}
               busy={{ analyze: busy.analyze, remove: busy.remove, edit: busy.edit }}
               dropActive={dropTarget === "analyze-file"}
               dropHandlers={dropZoneHandlers("analyze-file")}
@@ -517,6 +556,8 @@ export default function App() {
               onAnalyze={handleAnalyze}
               onRemoveMetadata={handleRemoveMetadata}
               onEditField={handleEditField}
+              onExportFormatChange={setExportFormat}
+              onExport={handleExportReport}
               onOfficeValueChange={(field, value) =>
                 setOfficeValues((prev) => ({
                   ...prev,

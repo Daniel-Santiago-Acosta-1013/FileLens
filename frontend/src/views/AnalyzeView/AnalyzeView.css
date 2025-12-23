@@ -37,6 +37,11 @@
   flex-wrap: wrap;
 }
 
+.export-row {
+  align-items: center;
+  gap: 14px;
+}
+
 .field {
   display: flex;
   flex-direction: column;

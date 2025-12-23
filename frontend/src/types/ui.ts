@@ -15,6 +15,8 @@ export type DropTarget = "analyze-file" | "clean-directory" | "clean-files";
 
 export type CleanMode = "directory" | "files";
 
+export type ExportFormat = "json" | "txt" | "xlsx" | "pdf";
+
 export type NavItem = {
   id: ViewId;
   label: string;
