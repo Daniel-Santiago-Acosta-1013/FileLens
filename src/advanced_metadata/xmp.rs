@@ -107,10 +107,10 @@ pub fn parse_xmp_metadata(packet: &str) -> Option<XmpMetadata> {
         } else {
             EntryLevel::Info
         };
-        if push_entry(&mut metadata.entries, &mut seen, spec.label, value.clone(), level) {
-            if spec.sensitive {
-                metadata.risks.push(ReportEntry::warning(spec.label, value));
-            }
+        if push_entry(&mut metadata.entries, &mut seen, spec.label, value.clone(), level)
+            && spec.sensitive
+        {
+            metadata.risks.push(ReportEntry::warning(spec.label, value));
         }
     }
 
@@ -238,10 +238,8 @@ fn key_matches(found: &str, wanted: &str) -> bool {
     if found.eq_ignore_ascii_case(wanted) {
         return true;
     }
-    if !wanted.contains(':') {
-        if let Some(local) = found.split(':').last() {
-            return local.eq_ignore_ascii_case(wanted);
-        }
+    if !wanted.contains(':') && let Some(local) = found.rsplit(':').next() {
+        return local.eq_ignore_ascii_case(wanted);
     }
     false
 }

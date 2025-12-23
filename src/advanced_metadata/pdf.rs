@@ -23,81 +23,81 @@ pub fn extract_pdf_metadata(path: &Path) -> AdvancedMetadataResult {
     };
 
     let mut has_entries = false;
-    if let Ok(info_ref) = doc.trailer.get(b"Info") {
-        if let Some(info_dict) = deref_dictionary(&doc, info_ref) {
-            has_entries |= push_pdf_entry(
-                &doc,
-                info_dict,
-                b"Title",
-                "Título",
-                false,
-                &mut section,
-                &mut risks,
-            );
-            has_entries |= push_pdf_entry(
-                &doc,
-                info_dict,
-                b"Author",
-                "Autor",
-                true,
-                &mut section,
-                &mut risks,
-            );
-            has_entries |= push_pdf_entry(
-                &doc,
-                info_dict,
-                b"Subject",
-                "Asunto",
-                false,
-                &mut section,
-                &mut risks,
-            );
-            has_entries |= push_pdf_entry(
-                &doc,
-                info_dict,
-                b"Keywords",
-                "Palabras clave",
-                false,
-                &mut section,
-                &mut risks,
-            );
-            has_entries |= push_pdf_entry(
-                &doc,
-                info_dict,
-                b"Creator",
-                "Creador",
-                true,
-                &mut section,
-                &mut risks,
-            );
-            has_entries |= push_pdf_entry(
-                &doc,
-                info_dict,
-                b"Producer",
-                "Productor",
-                true,
-                &mut section,
-                &mut risks,
-            );
-            has_entries |= push_pdf_entry(
-                &doc,
-                info_dict,
-                b"CreationDate",
-                "Fecha de creación",
-                false,
-                &mut section,
-                &mut risks,
-            );
-            has_entries |= push_pdf_entry(
-                &doc,
-                info_dict,
-                b"ModDate",
-                "Fecha de modificación",
-                false,
-                &mut section,
-                &mut risks,
-            );
-        }
+    if let Ok(info_ref) = doc.trailer.get(b"Info")
+        && let Some(info_dict) = deref_dictionary(&doc, info_ref)
+    {
+        has_entries |= push_pdf_entry(
+            &doc,
+            info_dict,
+            b"Title",
+            "Título",
+            false,
+            &mut section,
+            &mut risks,
+        );
+        has_entries |= push_pdf_entry(
+            &doc,
+            info_dict,
+            b"Author",
+            "Autor",
+            true,
+            &mut section,
+            &mut risks,
+        );
+        has_entries |= push_pdf_entry(
+            &doc,
+            info_dict,
+            b"Subject",
+            "Asunto",
+            false,
+            &mut section,
+            &mut risks,
+        );
+        has_entries |= push_pdf_entry(
+            &doc,
+            info_dict,
+            b"Keywords",
+            "Palabras clave",
+            false,
+            &mut section,
+            &mut risks,
+        );
+        has_entries |= push_pdf_entry(
+            &doc,
+            info_dict,
+            b"Creator",
+            "Creador",
+            true,
+            &mut section,
+            &mut risks,
+        );
+        has_entries |= push_pdf_entry(
+            &doc,
+            info_dict,
+            b"Producer",
+            "Productor",
+            true,
+            &mut section,
+            &mut risks,
+        );
+        has_entries |= push_pdf_entry(
+            &doc,
+            info_dict,
+            b"CreationDate",
+            "Fecha de creación",
+            false,
+            &mut section,
+            &mut risks,
+        );
+        has_entries |= push_pdf_entry(
+            &doc,
+            info_dict,
+            b"ModDate",
+            "Fecha de modificación",
+            false,
+            &mut section,
+            &mut risks,
+        );
     }
 
     if let Some(xmp_packet) = extract_pdf_xmp(&doc) {

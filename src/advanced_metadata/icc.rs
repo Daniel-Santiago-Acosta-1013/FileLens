@@ -278,7 +278,7 @@ fn parse_mluc_tag(data: &[u8]) -> Option<String> {
 }
 
 fn decode_utf16_be(data: &[u8]) -> Option<String> {
-    if data.len() % 2 != 0 {
+    if !data.len().is_multiple_of(2) {
         return None;
     }
     let mut values = Vec::with_capacity(data.len() / 2);

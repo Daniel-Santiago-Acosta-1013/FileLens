@@ -81,11 +81,9 @@ pub fn extract_image_metadata(path: &Path) -> AdvancedMetadataResult {
         );
     }
 
-    if !xmp_detected {
-        if let Some(xmp) = scan_xmp_packet(path) {
-            xmp_detected = true;
-            xmp_parsed |= append_xmp_entries(&mut section, &mut risks, &mut seen, &xmp);
-        }
+    if !xmp_detected && let Some(xmp) = scan_xmp_packet(path) {
+        xmp_detected = true;
+        xmp_parsed |= append_xmp_entries(&mut section, &mut risks, &mut seen, &xmp);
     }
 
     if xmp_detected && !xmp_parsed {
@@ -190,25 +188,25 @@ fn append_exif_entries(
         }
     }
 
-    if let Some(value) = gps_value(exif, Tag::GPSLatitude, Tag::GPSLatitudeRef) {
-        if push_entry_unique(
+    if let Some(value) = gps_value(exif, Tag::GPSLatitude, Tag::GPSLatitudeRef)
+        && push_entry_unique(
             section,
             seen,
             ReportEntry::warning("GPS Latitud", &value),
-        ) {
-            risks.push(ReportEntry::warning("GPS Latitud", value));
-            has_entries = true;
-        }
+        )
+    {
+        risks.push(ReportEntry::warning("GPS Latitud", value));
+        has_entries = true;
     }
-    if let Some(value) = gps_value(exif, Tag::GPSLongitude, Tag::GPSLongitudeRef) {
-        if push_entry_unique(
+    if let Some(value) = gps_value(exif, Tag::GPSLongitude, Tag::GPSLongitudeRef)
+        && push_entry_unique(
             section,
             seen,
             ReportEntry::warning("GPS Longitud", &value),
-        ) {
-            risks.push(ReportEntry::warning("GPS Longitud", value));
-            has_entries = true;
-        }
+        )
+    {
+        risks.push(ReportEntry::warning("GPS Longitud", value));
+        has_entries = true;
     }
     if let Some(field) = exif.get_field(Tag::GPSAltitude, IFD_GPS) {
         let value = field.display_value().to_string();
@@ -225,7 +223,7 @@ fn append_exif_entries(
     has_entries
 }
 
-fn get_exif_field<'a>(exif: &'a exif::Exif, tag: Tag) -> Option<&'a exif::Field> {
+fn get_exif_field(exif: &exif::Exif, tag: Tag) -> Option<&exif::Field> {
     for ifd in [In::PRIMARY, IFD_EXIF, IFD_GPS, IFD_INTEROP] {
         if let Some(field) = exif.get_field(tag, ifd) {
             return Some(field);
