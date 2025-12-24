@@ -24,6 +24,14 @@ Frontend calls Tauri commands via `@tauri-apps/api/core` `invoke`:
 Cleanup progress is emitted as `cleanup://progress` with payloads:
 `started`, `processing`, `success`, `failure`, `finished` (see `src-tauri/src/main.rs`).
 
+## Logging requirements
+Any new functionality must log warnings and errors to the Logs view with full error detail; avoid info/success logging to keep the log signal high. Use the centralized logger in `frontend/src/App.tsx` (the `logEvent` helper) and pass it down when a view/component needs to report warnings/errors. Implementation guidance:
+- Only log `warning` and `error` levels; do not log `info` or `success`.
+- Always include full error detail (pass the raw `Error` object or full payload so the logger can capture stack/message without truncation).
+- Provide a short, actionable message and a stable context tag (e.g. `cleanup`, `analyze`, `export`, `office`, `picker`).
+- Log only when something is wrong or blocked (validation failures, failed invokes, failed subscriptions, unexpected states); do not log routine events like drag & drop or normal progress.
+- If a user-facing toast is shown for a warning/error, mirror it with a log entry at the same level.
+
 ## Drag & drop notes (Tauri v2)
 File drops are handled via Tauri’s `onDragDropEvent` from the current webview/window.  
 HTML5 drag-and-drop may not yield filesystem paths in the browser; the app relies on Tauri events for real file paths.

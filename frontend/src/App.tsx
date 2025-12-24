@@ -169,6 +169,8 @@ export default function App() {
   const cleanupTargetsRef = useRef<Set<string>>(new Set());
   const cleanupOrderRef = useRef<string[]>([]);
   const cleanupIndexRef = useRef(0);
+  const fileItemsRef = useRef<CleanFileItem[]>([]);
+  const dirItemsRef = useRef<CleanFileItem[]>([]);
 
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const dropTargetRef = useRef<DropTarget | null>(null);
@@ -197,6 +199,14 @@ export default function App() {
     },
     []
   );
+
+  useEffect(() => {
+    fileItemsRef.current = fileItems;
+  }, [fileItems]);
+
+  useEffect(() => {
+    dirItemsRef.current = dirItems;
+  }, [dirItems]);
 
   const systemEntries = useMemo(() => extractSystem(report), [report]);
   const mimeEntry = useMemo<ReportEntry | null>(() => getEntry(report, "Tipo MIME"), [report]);
@@ -245,6 +255,42 @@ export default function App() {
 
   const updateItemByPath = (path: string, updater: (item: CleanFileItem) => CleanFileItem) => {
     updateItemsByPaths([path], updater);
+  };
+
+  const reanalyzeAfterCleanup = async (path: string) => {
+    const normalized = normalizePath(path);
+    const hasPath =
+      fileItemsRef.current.some((item) => normalizePath(item.path) === normalized) ||
+      dirItemsRef.current.some((item) => normalizePath(item.path) === normalized);
+    if (!hasPath) return;
+
+    updateItemByPath(path, (item) => ({
+      ...item,
+      analysisStatus: "analyzing",
+      analysisError: "",
+      report: null
+    }));
+    try {
+      const report = await invoke<MetadataReport>("analyze_file", {
+        path,
+        includeHash: true
+      });
+      updateItemByPath(path, (item) => ({
+        ...item,
+        analysisStatus: "ready",
+        analysisError: "",
+        report
+      }));
+    } catch (error) {
+      updateItemByPath(path, (item) => ({
+        ...item,
+        analysisStatus: "error",
+        analysisError: String(error),
+        report: null
+      }));
+      showToast("error", `No se pudo reanalizar el archivo: ${error}`);
+      logEvent("error", "Reanalisis fallo despues de limpieza", { path, error }, "clean-analyze");
+    }
   };
 
   const runAnalysisQueue = async (
@@ -396,6 +442,7 @@ export default function App() {
           cleanupStatus: "success",
           cleanupError: ""
         }));
+        void reanalyzeAfterCleanup(payload.path);
       }
       if (payload.type === "failure") {
         setCleanup((prev) => ({
