@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import type { HTMLAttributes } from "react";
 import DropZone from "../../components/molecules/DropZone/DropZone";
 import SegmentedControl from "../../components/molecules/SegmentedControl/SegmentedControl";
@@ -5,8 +6,11 @@ import Button from "../../components/atoms/Button/Button";
 import Toggle from "../../components/atoms/Toggle/Toggle";
 import Section from "../../components/layout/Section/Section";
 import Sheet from "../../components/layout/Sheet/Sheet";
-import type { CleanupState, DirectoryAnalysisSummary } from "../../types/cleanup";
-import type { CleanMode, DropTarget, Filter } from "../../types/ui";
+import MetaRow from "../../components/molecules/MetaRow/MetaRow";
+import Note from "../../components/molecules/Note/Note";
+import type { CleanFileItem, DirectoryAnalysisSummary } from "../../types/cleanup";
+import type { CleanMode, DropTarget } from "../../types/ui";
+import { extractSystem } from "../../utils/metadata";
 import "./CleanView.css";
 
 type CleanViewProps = {
@@ -14,26 +18,20 @@ type CleanViewProps = {
   dirPath: string;
   selectedFiles: string[];
   recursive: boolean;
-  filter: Filter;
   dirSummary: DirectoryAnalysisSummary | null;
   fileSummary: DirectoryAnalysisSummary | null;
   extensionCounts: [string, number][];
-  cleanup: CleanupState;
-  busy: {
-    dirAnalyze: boolean;
-    fileAnalyze: boolean;
-    cleanup: boolean;
-  };
+  cleanupRunning: boolean;
+  dirItems: CleanFileItem[];
+  fileItems: CleanFileItem[];
   dropTarget: DropTarget | null;
   dropHandlers: (target: DropTarget) => HTMLAttributes<HTMLDivElement>;
   onSetCleanMode: (mode: CleanMode) => void;
   onPickDirectory: () => void;
   onPickFiles: () => void;
   onToggleRecursive: () => void;
-  onSetFilter: (filter: Filter) => void;
-  onAnalyzeDirectory: () => void;
-  onAnalyzeFiles: () => void;
-  onStartCleanup: () => void;
+  onCleanItem: (path: string) => void;
+  onCleanAll: () => void;
 };
 
 const folderIcon = (
@@ -86,31 +84,78 @@ const filesIcon = (
   </svg>
 );
 
+const getStatusMeta = (item: CleanFileItem) => {
+  if (item.cleanupStatus === "cleaning") {
+    return { label: "Limpiando", tone: "status--active" };
+  }
+  if (item.cleanupStatus === "success") {
+    return { label: "Limpio", tone: "status--success" };
+  }
+  if (item.cleanupStatus === "error") {
+    return { label: "Error", tone: "status--error" };
+  }
+  if (item.cleanupStatus === "queued") {
+    return { label: "Preparando", tone: "status--muted" };
+  }
+  if (item.analysisStatus === "analyzing") {
+    return { label: "Analizando", tone: "status--active" };
+  }
+  if (item.analysisStatus === "queued") {
+    return { label: "Preparando", tone: "status--muted" };
+  }
+  if (item.analysisStatus === "error") {
+    return { label: "Error", tone: "status--error" };
+  }
+  return { label: "Listo", tone: "status--ready" };
+};
+
 export default function CleanView({
   cleanMode,
   dirPath,
   selectedFiles,
   recursive,
-  filter,
   dirSummary,
   fileSummary,
   extensionCounts,
-  cleanup,
-  busy,
+  cleanupRunning,
+  dirItems,
+  fileItems,
   dropTarget,
   dropHandlers,
   onSetCleanMode,
   onPickDirectory,
   onPickFiles,
   onToggleRecursive,
-  onSetFilter,
-  onAnalyzeDirectory,
-  onAnalyzeFiles,
-  onStartCleanup
+  onCleanItem,
+  onCleanAll
 }: CleanViewProps) {
   const summary = cleanMode === "directory" ? dirSummary : fileSummary;
+  const items = cleanMode === "directory" ? dirItems : fileItems;
   const isDirActive = dropTarget === "clean-directory";
   const isFilesActive = dropTarget === "clean-files";
+  const [detailsPath, setDetailsPath] = useState<string | null>(null);
+
+  const detailsItem = useMemo(() => {
+    if (!detailsPath) return null;
+    return items.find((item) => item.path === detailsPath) ?? null;
+  }, [detailsPath, items]);
+
+  const detailsReport = detailsItem?.report ?? null;
+  const detailsSystem = useMemo(() => extractSystem(detailsReport), [detailsReport]);
+
+  const analyzingCount = items.filter((item) => item.analysisStatus === "analyzing").length;
+  const queuedCount = items.filter((item) => item.analysisStatus === "queued").length;
+  const analysisPending = analyzingCount + queuedCount > 0;
+  const canCleanAll =
+    items.length > 1 &&
+    items.some((item) => item.analysisStatus === "ready") &&
+    !analysisPending &&
+    !cleanupRunning;
+  const filteredOutCount = Math.max(0, selectedFiles.length - fileItems.length);
+
+  const closeDetails = () => {
+    setDetailsPath(null);
+  };
 
   return (
     <Sheet>
@@ -143,24 +188,28 @@ export default function CleanView({
               checked={recursive}
               onChange={onToggleRecursive}
             />
-            <SegmentedControl
-              value={filter}
-              options={[
-                { id: "all", label: "Todos" },
-                { id: "images", label: "Imagenes" },
-                { id: "office", label: "Office" }
-              ]}
-              onChange={onSetFilter}
-            />
           </div>
-          <div className="section-row">
-            <Button variant="secondary" onClick={onAnalyzeDirectory} disabled={busy.dirAnalyze}>
-              {busy.dirAnalyze ? "Analizando..." : "Analizar"}
-            </Button>
-            <Button variant="primary" onClick={onStartCleanup} disabled={busy.cleanup}>
-              {busy.cleanup ? "Procesando..." : "Limpiar"}
-            </Button>
-          </div>
+          {items.length > 0 ? (
+            <div className="clean-toolbar">
+              <div className="clean-count">
+                <strong>{items.length}</strong>
+                <span>archivos cargados</span>
+                {analysisPending && (
+                  <span className="muted">
+                    Analizando {analyzingCount + queuedCount} archivo
+                    {analyzingCount + queuedCount === 1 ? "" : "s"}...
+                  </span>
+                )}
+              </div>
+              {items.length > 1 && (
+                <Button variant="primary" onClick={onCleanAll} disabled={!canCleanAll}>
+                  {cleanupRunning ? "Limpiando..." : "Limpiar todos"}
+                </Button>
+              )}
+            </div>
+          ) : (
+            <p className="muted">Carga un directorio para iniciar el analisis automatico.</p>
+          )}
         </Section>
       ) : (
         <Section label="Archivos">
@@ -178,36 +227,91 @@ export default function CleanView({
             handlers={dropHandlers("clean-files")}
             onAction={onPickFiles}
           />
-          <div className="section-row">
-            <SegmentedControl
-              value={filter}
-              options={[
-                { id: "all", label: "Todos" },
-                { id: "images", label: "Imagenes" },
-                { id: "office", label: "Office" }
-              ]}
-              onChange={onSetFilter}
-            />
-          </div>
-          {selectedFiles.length > 0 && (
-            <div className="file-list">
-              {selectedFiles.slice(0, 3).map((file) => (
-                <div key={file} className="file-item">
-                  {file}
-                </div>
-              ))}
-              {selectedFiles.length > 3 && (
-                <div className="file-item muted">+ {selectedFiles.length - 3} mas</div>
+          {items.length > 0 ? (
+            <div className="clean-toolbar">
+              <div className="clean-count">
+                <strong>{items.length}</strong>
+                <span>archivos cargados</span>
+                {filteredOutCount > 0 && (
+                  <span className="muted">{filteredOutCount} omitidos por tipo no compatible</span>
+                )}
+                {analysisPending && (
+                  <span className="muted">
+                    Analizando {analyzingCount + queuedCount} archivo
+                    {analyzingCount + queuedCount === 1 ? "" : "s"}...
+                  </span>
+                )}
+              </div>
+              {items.length > 1 && (
+                <Button variant="primary" onClick={onCleanAll} disabled={!canCleanAll}>
+                  {cleanupRunning ? "Limpiando..." : "Limpiar todos"}
+                </Button>
               )}
             </div>
+          ) : (
+            <p className="muted">Carga archivos para iniciar el analisis automatico.</p>
           )}
-          <div className="section-row">
-            <Button variant="secondary" onClick={onAnalyzeFiles} disabled={busy.fileAnalyze}>
-              {busy.fileAnalyze ? "Analizando..." : "Analizar"}
-            </Button>
-            <Button variant="primary" onClick={onStartCleanup} disabled={busy.cleanup}>
-              {busy.cleanup ? "Procesando..." : "Limpiar"}
-            </Button>
+        </Section>
+      )}
+
+      {items.length > 0 && (
+        <Section label="Archivos en limpieza">
+          <div className="clean-grid">
+            {items.map((item) => {
+              const status = getStatusMeta(item);
+              const isLoading =
+                item.analysisStatus === "analyzing" || item.cleanupStatus === "cleaning";
+              const canOpenDetails = item.analysisStatus === "ready";
+              const canClean =
+                item.analysisStatus === "ready" &&
+                item.cleanupStatus === "idle" &&
+                !cleanupRunning;
+              const cleanLabel =
+                item.cleanupStatus === "success"
+                  ? "Limpio"
+                  : item.cleanupStatus === "cleaning"
+                    ? "Limpiando..."
+                    : "Limpiar";
+
+              return (
+                <article
+                  key={item.path}
+                  className={`clean-card ${isLoading ? "is-loading" : ""}`.trim()}
+                >
+                  <div className="clean-card__header">
+                    <div className="clean-card__title">
+                      <strong>{item.name}</strong>
+                      <span className="muted">{item.path}</span>
+                    </div>
+                    <span className={`status-pill ${status.tone}`}>{status.label}</span>
+                  </div>
+                  <div className="clean-card__actions">
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        setDetailsPath(item.path);
+                      }}
+                      disabled={!canOpenDetails}
+                    >
+                      Detalles
+                    </Button>
+                    <Button variant="primary" onClick={() => onCleanItem(item.path)} disabled={!canClean}>
+                      {cleanLabel}
+                    </Button>
+                  </div>
+                  {item.analysisStatus === "error" && (
+                    <p className="inline-error">
+                      No se pudo analizar{item.analysisError ? `: ${item.analysisError}` : ""}
+                    </p>
+                  )}
+                  {item.cleanupStatus === "error" && (
+                    <p className="inline-error">
+                      Error de limpieza{item.cleanupError ? `: ${item.cleanupError}` : ""}
+                    </p>
+                  )}
+                </article>
+              );
+            })}
           </div>
         </Section>
       )}
@@ -238,31 +342,64 @@ export default function CleanView({
             </div>
           </div>
         ) : (
-          <p className="muted">Ejecuta el analisis para ver el desglose.</p>
+          <p className="muted">Carga archivos para ver el desglose.</p>
         )}
       </Section>
 
-      <Section label="Progreso">
-        <div className="progress">
-          <div
-            className="progress-bar"
-            style={{
-              width: cleanup.total ? `${Math.round((cleanup.index / cleanup.total) * 100)}%` : "0%"
-            }}
-          />
+      {detailsItem && detailsReport && (
+        <div className="clean-modal-overlay" onClick={closeDetails}>
+          <div className="clean-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="clean-modal__header">
+              <div className="clean-modal__title">
+                <span className="label">Detalles</span>
+                <strong>{detailsItem.name}</strong>
+                <span className="muted">{detailsItem.path}</span>
+              </div>
+              <Button variant="secondary" onClick={closeDetails}>
+                Cerrar
+              </Button>
+            </div>
+            <div className="clean-modal__body">
+              <div className="meta-list">
+                {detailsSystem.map((entry, index) => (
+                  <MetaRow key={`${entry.label}-${index}`} label={entry.label} value={entry.value} />
+                ))}
+                {detailsReport.internal.map((section) => (
+                  <div key={section.title} className="meta-group">
+                    <div className="section-title">{section.title}</div>
+                    {section.entries.map((entry, index) => (
+                      <MetaRow
+                        key={`${section.title}-${index}`}
+                        label={entry.label}
+                        value={entry.value}
+                      />
+                    ))}
+                    {section.notice && <Note tone={section.notice.level}>{section.notice.message}</Note>}
+                  </div>
+                ))}
+                {detailsReport.risks.length > 0 && (
+                  <div className="meta-group">
+                    <div className="section-title">Riesgos</div>
+                    {detailsReport.risks.map((entry, index) => (
+                      <MetaRow key={`risk-${index}`} label={entry.label} value={entry.value} />
+                    ))}
+                  </div>
+                )}
+                {detailsReport.errors.length > 0 && (
+                  <div className="meta-group">
+                    <div className="section-title">Errores</div>
+                    {detailsReport.errors.map((error, index) => (
+                      <Note key={`error-${index}`} tone="Error">
+                        {error}
+                      </Note>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="summary-row">
-          <span>Actual</span>
-          <span className="mono">{cleanup.current || "-"}</span>
-        </div>
-        <div className="summary-row">
-          <span>OK / ERR</span>
-          <strong>
-            {cleanup.successes} / {cleanup.failures}
-          </strong>
-        </div>
-        {cleanup.lastError && <p className="inline-error">Ultimo error: {cleanup.lastError}</p>}
-      </Section>
+      )}
     </Sheet>
   );
 }

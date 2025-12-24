@@ -3,7 +3,8 @@ import type { NavItem, OfficeField } from "./types/ui";
 
 export const NAV_ITEMS: NavItem[] = [
   { id: "analyze", label: "Analisis" },
-  { id: "clean", label: "Limpieza" }
+  { id: "clean", label: "Limpieza" },
+  { id: "logs", label: "Logs" }
 ];
 
 export const CLEANUP_EMPTY: CleanupState = {

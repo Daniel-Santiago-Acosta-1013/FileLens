@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "Permisos base para la ventana principal de FileLens",
+  "windows": ["main"],
+  "permissions": ["core:default", "core:event:default"]
+}

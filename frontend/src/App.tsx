@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { DragEvent, HTMLAttributes } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Dispatch, DragEvent, HTMLAttributes, MutableRefObject, SetStateAction } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -11,20 +11,127 @@ import Topbar from "./components/organisms/Topbar/Topbar";
 import Toast from "./components/organisms/Toast/Toast";
 import AnalyzeView from "./views/AnalyzeView/AnalyzeView";
 import CleanView from "./views/CleanView/CleanView";
+import LogsView from "./views/LogsView/LogsView";
 import { CLEANUP_EMPTY, NAV_ITEMS } from "./constants";
-import type { CleanupProgress, CleanupState, DirectoryAnalysisSummary } from "./types/cleanup";
+import type {
+  CleanFileItem,
+  CleanupProgress,
+  CleanupState,
+  DirectoryAnalysisSummary
+} from "./types/cleanup";
 import type { MetadataReport, ReportEntry } from "./types/metadata";
 import type {
   CleanMode,
   DropTarget,
   ExportFormat,
-  Filter,
+  LogEntry,
   OfficeField,
   Toast as ToastType,
   ToastKind,
   ViewId
 } from "./types/ui";
 import { buildOfficeValues, extractSystem, getEntry } from "./utils/metadata";
+
+const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "tiff", "tif"]);
+const OFFICE_EXTENSIONS = new Set(["docx", "xlsx", "pptx"]);
+const NO_EXTENSION_LABEL = "sin extension";
+type LogSeverity = "warning" | "error";
+
+const normalizePath = (path: string) => {
+  let normalized = path.trim();
+  if (normalized.startsWith("\\\\?\\")) {
+    normalized = normalized.slice(4);
+  }
+  return normalized.replace(/\\/g, "/");
+};
+
+const getFileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
+
+const getExtension = (path: string) => {
+  const base = getFileName(path);
+  const parts = base.split(".");
+  if (parts.length <= 1) return "";
+  return parts[parts.length - 1]?.toLowerCase() ?? "";
+};
+
+const isSupportedPath = (path: string) => {
+  const ext = getExtension(path);
+  const isImage = IMAGE_EXTENSIONS.has(ext);
+  const isOffice = OFFICE_EXTENSIONS.has(ext);
+  return isImage || isOffice;
+};
+
+const buildSummaryFromPaths = (paths: string[]): DirectoryAnalysisSummary => {
+  const extensionCounts = new Map<string, number>();
+  const imageExtensions = new Set<string>();
+  const officeExtensions = new Set<string>();
+  let images = 0;
+  let office = 0;
+
+  for (const path of paths) {
+    const ext = getExtension(path);
+    const key = ext || NO_EXTENSION_LABEL;
+    extensionCounts.set(key, (extensionCounts.get(key) ?? 0) + 1);
+    if (IMAGE_EXTENSIONS.has(ext)) {
+      images += 1;
+      imageExtensions.add(ext);
+    }
+    if (OFFICE_EXTENSIONS.has(ext)) {
+      office += 1;
+      officeExtensions.add(ext);
+    }
+  }
+
+  const sortedExtensions = Array.from(extensionCounts.entries()).sort((a, b) => {
+    if (b[1] !== a[1]) return b[1] - a[1];
+    return a[0].localeCompare(b[0]);
+  });
+
+  return {
+    total_files: paths.length,
+    images_count: images,
+    office_count: office,
+    extension_counts: sortedExtensions,
+    image_extensions: Array.from(imageExtensions),
+    office_extensions: Array.from(officeExtensions)
+  };
+};
+
+const buildCleanItems = (paths: string[]): CleanFileItem[] => {
+  const uniquePaths = Array.from(new Set(paths));
+  return uniquePaths.map((path) => ({
+    path,
+    name: getFileName(path),
+    analysisStatus: "queued",
+    analysisError: "",
+    report: null,
+    cleanupStatus: "idle",
+    cleanupError: ""
+  }));
+};
+
+const formatLogDetail = (detail: unknown) => {
+  if (detail === undefined) return "";
+  if (detail === null) return "null";
+  if (typeof detail === "string") return detail;
+  if (detail instanceof Error) {
+    return detail.stack || detail.message;
+  }
+  try {
+    return JSON.stringify(
+      detail,
+      (_key, value) => {
+        if (value instanceof Error) {
+          return { message: value.message, stack: value.stack };
+        }
+        return value;
+      },
+      2
+    );
+  } catch {
+    return String(detail);
+  }
+};
 
 export default function App() {
   const [view, setView] = useState<ViewId>("analyze");
@@ -43,16 +150,25 @@ export default function App() {
   const [dirPath, setDirPath] = useState("");
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [recursive, setRecursive] = useState(false);
-  const [filter, setFilter] = useState<Filter>("all");
   const [exportFormat, setExportFormat] = useState<ExportFormat>("json");
   const [dirSummary, setDirSummary] = useState<DirectoryAnalysisSummary | null>(null);
   const [fileSummary, setFileSummary] = useState<DirectoryAnalysisSummary | null>(null);
   const [cleanup, setCleanup] = useState<CleanupState>(CLEANUP_EMPTY);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [dirItems, setDirItems] = useState<CleanFileItem[]>([]);
+  const [fileItems, setFileItems] = useState<CleanFileItem[]>([]);
 
   const [toast, setToast] = useState<ToastType | null>(null);
   const toastTimer = useRef<number | null>(null);
   const lastDropRef = useRef<{ signature: string; time: number } | null>(null);
   const pendingDropPathsRef = useRef<string[]>([]);
+  const logIndexRef = useRef(0);
+  const fileAnalysisTokenRef = useRef(0);
+  const dirAnalysisTokenRef = useRef(0);
+  const dirLoadTokenRef = useRef(0);
+  const cleanupTargetsRef = useRef<Set<string>>(new Set());
+  const cleanupOrderRef = useRef<string[]>([]);
+  const cleanupIndexRef = useRef(0);
 
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const dropTargetRef = useRef<DropTarget | null>(null);
@@ -66,6 +182,21 @@ export default function App() {
     edit: false,
     export: false
   });
+
+  const logEvent = useCallback(
+    (level: LogSeverity, message: string, detail?: unknown, context = "app") => {
+      const entry: LogEntry = {
+        id: `${Date.now()}-${logIndexRef.current++}`,
+        time: new Date().toISOString(),
+        level,
+        context,
+        message,
+        detail: formatLogDetail(detail)
+      };
+      setLogs((prev) => [...prev, entry]);
+    },
+    []
+  );
 
   const systemEntries = useMemo(() => extractSystem(report), [report]);
   const mimeEntry = useMemo<ReportEntry | null>(() => getEntry(report, "Tipo MIME"), [report]);
@@ -93,6 +224,115 @@ export default function App() {
     return false;
   }, [filePath, mimeEntry]);
 
+  const updateItemsByPaths = (
+    paths: string[],
+    updater: (item: CleanFileItem) => CleanFileItem
+  ) => {
+    const normalized = paths.map(normalizePath).filter(Boolean);
+    if (!normalized.length) return;
+    const pathSet = new Set(normalized);
+    setFileItems((prev) =>
+      prev.map((item) =>
+        pathSet.has(normalizePath(item.path)) ? updater(item) : item
+      )
+    );
+    setDirItems((prev) =>
+      prev.map((item) =>
+        pathSet.has(normalizePath(item.path)) ? updater(item) : item
+      )
+    );
+  };
+
+  const updateItemByPath = (path: string, updater: (item: CleanFileItem) => CleanFileItem) => {
+    updateItemsByPaths([path], updater);
+  };
+
+  const runAnalysisQueue = async (
+    paths: string[],
+    setItems: Dispatch<SetStateAction<CleanFileItem[]>>,
+    tokenRef: MutableRefObject<number>
+  ) => {
+    const token = ++tokenRef.current;
+    for (const path of paths) {
+      if (tokenRef.current !== token) return;
+      setItems((prev) =>
+        prev.map((item) =>
+          item.path === path
+            ? { ...item, analysisStatus: "analyzing", analysisError: "" }
+            : item
+        )
+      );
+      try {
+        const report = await invoke<MetadataReport>("analyze_file", {
+          path,
+          includeHash: true
+        });
+        if (tokenRef.current !== token) return;
+        setItems((prev) =>
+          prev.map((item) =>
+            item.path === path
+              ? { ...item, analysisStatus: "ready", report, analysisError: "" }
+              : item
+          )
+        );
+      } catch (error) {
+        if (tokenRef.current !== token) return;
+        setItems((prev) =>
+          prev.map((item) =>
+            item.path === path
+              ? { ...item, analysisStatus: "error", analysisError: String(error) }
+              : item
+          )
+        );
+        logEvent("error", "Analisis fallo", { path, error }, "clean-analyze");
+      }
+    }
+  };
+
+  const refreshFileItems = (paths: string[]) => {
+    const filtered = paths.filter((path) => isSupportedPath(path));
+    if (!filtered.length) {
+      fileAnalysisTokenRef.current += 1;
+      setFileItems([]);
+      setFileSummary(null);
+      if (paths.length) {
+        showToast("warning", "No hay archivos compatibles para limpiar");
+        logEvent("warning", "Sin archivos compatibles para limpiar", { paths }, "clean");
+      }
+      return;
+    }
+    setFileSummary(buildSummaryFromPaths(filtered));
+    setFileItems(buildCleanItems(filtered));
+    void runAnalysisQueue(filtered, setFileItems, fileAnalysisTokenRef);
+  };
+
+  const refreshDirectoryItems = async (path: string) => {
+    const token = ++dirLoadTokenRef.current;
+    setDirItems([]);
+    setDirSummary(null);
+    dirAnalysisTokenRef.current += 1;
+    try {
+      const files = await invoke<string[]>("list_cleanup_files", {
+        path,
+        recursive,
+        filter: "all"
+      });
+      if (dirLoadTokenRef.current !== token) return;
+      if (!files.length) {
+        showToast("warning", "No hay archivos compatibles en el directorio");
+        logEvent("warning", "Directorio sin archivos compatibles", { path }, "clean");
+        return;
+      }
+      setDirSummary(buildSummaryFromPaths(files));
+      setDirItems(buildCleanItems(files));
+      void runAnalysisQueue(files, setDirItems, dirAnalysisTokenRef);
+    } catch (error) {
+      if (dirLoadTokenRef.current !== token) return;
+      showToast("error", `No se pudo cargar el directorio: ${error}`);
+      logEvent("error", "Error al cargar directorio", { path, error }, "clean");
+    }
+  };
+
   useEffect(() => {
     setOfficeValues(buildOfficeValues(report));
   }, [report]);
@@ -101,6 +341,12 @@ export default function App() {
     let stop: (() => void) | null = null;
     listen<CleanupProgress>("cleanup://progress", (event) => {
       const payload = event.payload;
+      if (payload.type === "failure") {
+        logEvent("error", "Limpieza fallo", payload, "cleanup");
+      }
+      if (payload.type === "finished" && payload.failures > 0) {
+        logEvent("warning", "Limpieza finalizada con errores", payload, "cleanup");
+      }
       if (payload.type === "started") {
         setCleanup({
           running: true,
@@ -112,6 +358,15 @@ export default function App() {
           lastError: "",
           finished: false
         });
+        cleanupIndexRef.current = 0;
+        const targets = Array.from(cleanupTargetsRef.current);
+        if (targets.length) {
+          updateItemsByPaths(targets, (item) => ({
+            ...item,
+            cleanupStatus: "queued",
+            cleanupError: ""
+          }));
+        }
       }
       if (payload.type === "processing") {
         setCleanup((prev) => ({
@@ -121,12 +376,25 @@ export default function App() {
           index: payload.index,
           current: payload.path
         }));
+        cleanupIndexRef.current = payload.index;
+        const fallbackPath = cleanupOrderRef.current[payload.index - 1];
+        updateItemsByPaths([payload.path, fallbackPath ?? ""], (item) => ({
+          ...item,
+          cleanupStatus: "cleaning",
+          cleanupError: ""
+        }));
       }
       if (payload.type === "success") {
         setCleanup((prev) => ({
           ...prev,
           successes: prev.successes + 1,
           current: payload.path
+        }));
+        const fallbackPath = cleanupOrderRef.current[cleanupIndexRef.current - 1];
+        updateItemsByPaths([payload.path, fallbackPath ?? ""], (item) => ({
+          ...item,
+          cleanupStatus: "success",
+          cleanupError: ""
         }));
       }
       if (payload.type === "failure") {
@@ -135,6 +403,12 @@ export default function App() {
           failures: prev.failures + 1,
           current: payload.path,
           lastError: payload.error
+        }));
+        const fallbackPath = cleanupOrderRef.current[cleanupIndexRef.current - 1];
+        updateItemsByPaths([payload.path, fallbackPath ?? ""], (item) => ({
+          ...item,
+          cleanupStatus: "error",
+          cleanupError: payload.error
         }));
       }
       if (payload.type === "finished") {
@@ -145,6 +419,9 @@ export default function App() {
           successes: payload.successes,
           failures: payload.failures
         }));
+        cleanupTargetsRef.current = new Set();
+        cleanupOrderRef.current = [];
+        cleanupIndexRef.current = 0;
         setBusy((prev) => ({ ...prev, cleanup: false }));
         showToast(
           payload.failures > 0 ? "warning" : "success",
@@ -155,8 +432,9 @@ export default function App() {
       .then((unlisten) => {
         stop = unlisten;
       })
-      .catch(() => {
+      .catch((error) => {
         showToast("error", "No se pudo suscribir a eventos de limpieza");
+        logEvent("error", "Suscripcion fallida a eventos de limpieza", error, "cleanup");
       });
 
     return () => {
@@ -170,7 +448,32 @@ export default function App() {
     }
     setToast({ kind, message });
     toastTimer.current = window.setTimeout(() => setToast(null), 3600);
+    if (kind === "warning" || kind === "error") {
+      logEvent(kind, `Toast: ${message}`, undefined, "toast");
+    }
   };
+
+  useEffect(() => {
+    if (cleanMode !== "files") return;
+    if (!selectedFiles.length) {
+      fileAnalysisTokenRef.current += 1;
+      setFileItems([]);
+      setFileSummary(null);
+      return;
+    }
+    refreshFileItems(selectedFiles);
+  }, [cleanMode, selectedFiles]);
+
+  useEffect(() => {
+    if (cleanMode !== "directory") return;
+    if (!dirPath.trim()) {
+      dirAnalysisTokenRef.current += 1;
+      setDirItems([]);
+      setDirSummary(null);
+      return;
+    }
+    void refreshDirectoryItems(dirPath);
+  }, [cleanMode, dirPath, recursive]);
 
   const setDropTargetState = (target: DropTarget | null) => {
     dropTargetRef.current = target;
@@ -192,14 +495,24 @@ export default function App() {
   const applyDirectoryPath = (path: string, message = "Directorio seleccionado") => {
     setDirPath(path);
     setDirSummary(null);
+    setDirItems([]);
+    dirAnalysisTokenRef.current += 1;
     setCleanup(CLEANUP_EMPTY);
+    cleanupTargetsRef.current = new Set();
+    cleanupOrderRef.current = [];
+    cleanupIndexRef.current = 0;
     showToast("info", message);
   };
 
   const applyFiles = (paths: string[], message?: string) => {
     setSelectedFiles(paths);
     setFileSummary(null);
+    setFileItems([]);
+    fileAnalysisTokenRef.current += 1;
     setCleanup(CLEANUP_EMPTY);
+    cleanupTargetsRef.current = new Set();
+    cleanupOrderRef.current = [];
+    cleanupIndexRef.current = 0;
     showToast("info", message ?? `${paths.length} archivos seleccionados`);
   };
 
@@ -297,7 +610,7 @@ export default function App() {
       .then((unlisten) => {
         stopWebview = unlisten;
       })
-      .catch(() => {
+      .catch((error) => {
         showToast("error", "No se pudo habilitar arrastrar y soltar");
       });
 
@@ -306,7 +619,7 @@ export default function App() {
       .then((unlisten) => {
         stopWindow = unlisten;
       })
-      .catch(() => {
+      .catch((error) => {
         showToast("error", "No se pudo habilitar arrastrar y soltar");
       });
 
@@ -317,29 +630,51 @@ export default function App() {
   }, [view, cleanMode]);
 
   const handlePickFile = async () => {
-    const selected = await invoke<string | null>("pick_file");
-    if (selected) {
-      applyFilePath(selected);
+    try {
+      const selected = await invoke<string | null>("pick_file");
+      if (selected) {
+        applyFilePath(selected);
+      } else {
+        logEvent("warning", "Selector de archivo cancelado", undefined, "picker");
+      }
+    } catch (error) {
+      showToast("error", `No se pudo abrir el selector: ${error}`);
+      logEvent("error", "Error en selector de archivo", error, "picker");
     }
   };
 
   const handlePickDirectory = async () => {
-    const selected = await invoke<string | null>("pick_directory");
-    if (selected) {
-      applyDirectoryPath(selected);
+    try {
+      const selected = await invoke<string | null>("pick_directory");
+      if (selected) {
+        applyDirectoryPath(selected);
+      } else {
+        logEvent("warning", "Selector de directorio cancelado", undefined, "picker");
+      }
+    } catch (error) {
+      showToast("error", `No se pudo abrir el selector: ${error}`);
+      logEvent("error", "Error en selector de directorio", error, "picker");
     }
   };
 
   const handlePickFiles = async () => {
-    const selected = await invoke<string[] | null>("pick_files");
-    if (selected && selected.length) {
-      applyFiles(selected);
+    try {
+      const selected = await invoke<string[] | null>("pick_files");
+      if (selected && selected.length) {
+        applyFiles(selected);
+      } else {
+        logEvent("warning", "Selector de archivos cancelado", undefined, "picker");
+      }
+    } catch (error) {
+      showToast("error", `No se pudo abrir el selector: ${error}`);
+      logEvent("error", "Error en selector de archivos", error, "picker");
     }
   };
 
   const handleAnalyze = async () => {
     if (!filePath.trim()) {
       showToast("warning", "Selecciona un archivo");
+      logEvent("warning", "Analisis solicitado sin archivo", undefined, "analyze");
       return;
     }
     setBusy((prev) => ({ ...prev, analyze: true }));
@@ -354,105 +689,95 @@ export default function App() {
     } catch (error) {
       setReportError(String(error));
       showToast("error", "No se pudo analizar el archivo");
+      logEvent("error", "Analisis fallo", error, "analyze");
     } finally {
       setBusy((prev) => ({ ...prev, analyze: false }));
     }
   };
 
-  const handleAnalyzeDirectory = async () => {
-    if (!dirPath.trim()) {
-      showToast("warning", "Selecciona un directorio");
+  const handleCleanItem = async (path: string) => {
+    if (busy.cleanup) {
+      showToast("warning", "Ya hay una limpieza en curso");
+      logEvent("warning", "Limpieza solicitada con otra en curso", { path }, "cleanup");
       return;
     }
-    setBusy((prev) => ({ ...prev, dirAnalyze: true }));
-    try {
-      const summary = await invoke<DirectoryAnalysisSummary>("analyze_directory", {
-        path: dirPath,
-        recursive
-      });
-      setDirSummary(summary);
-      showToast("success", "Analisis completado");
-    } catch (error) {
-      showToast("error", `No se pudo analizar: ${error}`);
-    } finally {
-      setBusy((prev) => ({ ...prev, dirAnalyze: false }));
-    }
-  };
-
-  const handleAnalyzeFiles = async () => {
-    if (!selectedFiles.length) {
-      showToast("warning", "Selecciona archivos");
-      return;
-    }
-    setBusy((prev) => ({ ...prev, fileAnalyze: true }));
-    try {
-      const summary = await invoke<DirectoryAnalysisSummary>("analyze_files", {
-        paths: selectedFiles
-      });
-      setFileSummary(summary);
-      showToast("success", "Analisis completado");
-    } catch (error) {
-      showToast("error", `No se pudo analizar: ${error}`);
-    } finally {
-      setBusy((prev) => ({ ...prev, fileAnalyze: false }));
-    }
-  };
-
-  const handleStartCleanup = async () => {
-    if (cleanMode === "directory") {
-      if (!dirPath.trim()) {
-        showToast("warning", "Selecciona un directorio");
-        return;
-      }
-      if (!dirSummary) {
-        showToast("warning", "Ejecuta el analisis antes de limpiar");
-        return;
-      }
-      setBusy((prev) => ({ ...prev, cleanup: true }));
-      setCleanup(CLEANUP_EMPTY);
-      try {
-        await invoke("start_cleanup", {
-          path: dirPath,
-          recursive,
-          filter
-        });
-        showToast("info", "Limpieza iniciada");
-      } catch (error) {
-        setBusy((prev) => ({ ...prev, cleanup: false }));
-        showToast("error", `No se pudo iniciar la limpieza: ${error}`);
-      }
-      return;
-    }
-
-    if (!selectedFiles.length) {
-      showToast("warning", "Selecciona archivos");
-      return;
-    }
-    if (!fileSummary) {
-      showToast("warning", "Ejecuta el analisis antes de limpiar");
-      return;
-    }
+    cleanupTargetsRef.current = new Set([path]);
+    cleanupOrderRef.current = [path];
+    cleanupIndexRef.current = 0;
+    updateItemByPath(path, (item) => ({
+      ...item,
+      cleanupStatus: "queued",
+      cleanupError: ""
+    }));
     setBusy((prev) => ({ ...prev, cleanup: true }));
     setCleanup(CLEANUP_EMPTY);
     try {
       await invoke("start_cleanup_files", {
-        paths: selectedFiles,
-        filter
+        paths: [path],
+        filter: "all"
       });
       showToast("info", "Limpieza iniciada");
     } catch (error) {
       setBusy((prev) => ({ ...prev, cleanup: false }));
+      cleanupTargetsRef.current = new Set();
+      cleanupOrderRef.current = [];
+      cleanupIndexRef.current = 0;
+      updateItemByPath(path, (item) => ({ ...item, cleanupStatus: "idle" }));
       showToast("error", `No se pudo iniciar la limpieza: ${error}`);
+      logEvent("error", "Fallo iniciar limpieza individual", { path, error }, "cleanup");
+    }
+  };
+
+  const handleCleanAll = async () => {
+    if (busy.cleanup) {
+      showToast("warning", "Ya hay una limpieza en curso");
+      logEvent("warning", "Limpieza global solicitada con otra en curso", undefined, "cleanup");
+      return;
+    }
+    const activeItems = cleanMode === "directory" ? dirItems : fileItems;
+    const readyItems = activeItems.filter((item) => item.analysisStatus === "ready");
+    if (!readyItems.length) {
+      showToast("warning", "No hay archivos listos para limpiar");
+      logEvent("warning", "Limpieza global sin archivos listos", undefined, "cleanup");
+      return;
+    }
+    const paths = readyItems.map((item) => item.path);
+    cleanupTargetsRef.current = new Set(paths);
+    cleanupOrderRef.current = paths;
+    cleanupIndexRef.current = 0;
+    updateItemsByPaths(paths, (item) => ({
+      ...item,
+      cleanupStatus: "queued",
+      cleanupError: ""
+    }));
+    setBusy((prev) => ({ ...prev, cleanup: true }));
+    setCleanup(CLEANUP_EMPTY);
+    try {
+      await invoke("start_cleanup_files", {
+        paths,
+        filter: "all"
+      });
+      showToast("info", "Limpieza iniciada");
+    } catch (error) {
+      setBusy((prev) => ({ ...prev, cleanup: false }));
+      cleanupTargetsRef.current = new Set();
+      cleanupOrderRef.current = [];
+      cleanupIndexRef.current = 0;
+      updateItemsByPaths(paths, (item) => ({ ...item, cleanupStatus: "idle" }));
+      showToast("error", `No se pudo iniciar la limpieza: ${error}`);
+      logEvent("error", "Fallo iniciar limpieza global", { paths, error }, "cleanup");
     }
   };
 
   const handleRemoveMetadata = async () => {
     if (!filePath.trim()) {
       showToast("warning", "Selecciona un archivo");
+      logEvent("warning", "Eliminar metadata sin archivo", undefined, "analyze");
       return;
     }
     if (!report) {
       showToast("warning", "Analiza el archivo antes de limpiar metadata");
+      logEvent("warning", "Eliminar metadata sin analisis", { path: filePath }, "analyze");
       return;
     }
     setBusy((prev) => ({ ...prev, remove: true }));
@@ -461,6 +786,7 @@ export default function App() {
       showToast("success", "Metadata eliminada");
     } catch (error) {
       showToast("error", `No se pudo eliminar: ${error}`);
+      logEvent("error", "Eliminar metadata fallo", { path: filePath, error }, "analyze");
     } finally {
       setBusy((prev) => ({ ...prev, remove: false }));
     }
@@ -469,6 +795,7 @@ export default function App() {
   const handleExportReport = async () => {
     if (!report) {
       showToast("warning", "Analiza un archivo antes de exportar");
+      logEvent("warning", "Exportar sin analisis", { path: filePath }, "export");
       return;
     }
     const reportName = getEntry(report, "Nombre")?.value;
@@ -489,12 +816,15 @@ export default function App() {
       });
       if (savedPath) {
         showToast("success", `Exportado en ${savedPath}`);
+      } else {
+        logEvent("warning", "Exportacion cancelada", undefined, "export");
       }
     } catch (error) {
       const message = String(error);
       if (!message.toLowerCase().includes("cancel")) {
         showToast("error", `No se pudo exportar: ${message}`);
       }
+      logEvent("error", "Exportar reporte fallo", { error }, "export");
     } finally {
       setBusy((prev) => ({ ...prev, export: false }));
     }
@@ -503,15 +833,18 @@ export default function App() {
   const handleEditField = async (field: OfficeField) => {
     if (!filePath.trim()) {
       showToast("warning", "Selecciona un archivo");
+      logEvent("warning", "Editar metadata sin archivo", { field }, "office");
       return;
     }
     if (!report) {
       showToast("warning", "Analiza el archivo antes de editar");
+      logEvent("warning", "Editar metadata sin analisis", { path: filePath, field }, "office");
       return;
     }
     const value = officeValues[field]?.trim();
     if (!value) {
       showToast("warning", "Ingresa un valor valido");
+      logEvent("warning", "Editar metadata sin valor", { field }, "office");
       return;
     }
     setBusy((prev) => ({ ...prev, edit: true }));
@@ -524,6 +857,7 @@ export default function App() {
       showToast("success", "Metadata actualizada");
     } catch (error) {
       showToast("error", `No se pudo actualizar: ${error}`);
+      logEvent("error", "Actualizar metadata fallo", { path: filePath, field, error }, "office");
     } finally {
       setBusy((prev) => ({ ...prev, edit: false }));
     }
@@ -535,7 +869,7 @@ export default function App() {
       <main className="main">
         <Topbar title={NAV_ITEMS.find((item) => item.id === view)?.label ?? ""} />
         <section className="content">
-          {view === "analyze" ? (
+          {view === "analyze" && (
             <AnalyzeView
               filePath={filePath}
               includeHash={includeHash}
@@ -565,34 +899,30 @@ export default function App() {
                 }))
               }
             />
-          ) : (
+          )}
+          {view === "clean" && (
             <CleanView
               cleanMode={cleanMode}
               dirPath={dirPath}
               selectedFiles={selectedFiles}
               recursive={recursive}
-              filter={filter}
               dirSummary={dirSummary}
               fileSummary={fileSummary}
               extensionCounts={extensionCounts}
-              cleanup={cleanup}
-              busy={{
-                dirAnalyze: busy.dirAnalyze,
-                fileAnalyze: busy.fileAnalyze,
-                cleanup: busy.cleanup
-              }}
+              cleanupRunning={cleanup.running || busy.cleanup}
+              dirItems={dirItems}
+              fileItems={fileItems}
               dropTarget={dropTarget}
               dropHandlers={dropZoneHandlers}
               onSetCleanMode={setCleanMode}
               onPickDirectory={handlePickDirectory}
               onPickFiles={handlePickFiles}
               onToggleRecursive={() => setRecursive((prev) => !prev)}
-              onSetFilter={setFilter}
-              onAnalyzeDirectory={handleAnalyzeDirectory}
-              onAnalyzeFiles={handleAnalyzeFiles}
-              onStartCleanup={handleStartCleanup}
+              onCleanItem={handleCleanItem}
+              onCleanAll={handleCleanAll}
             />
           )}
+          {view === "logs" && <LogsView logs={logs} />}
         </section>
       </main>
       {toast && <Toast toast={toast} />}

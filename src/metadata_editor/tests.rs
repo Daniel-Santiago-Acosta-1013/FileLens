@@ -2,6 +2,7 @@ use super::image::{remove_image_metadata, verify_image_metadata_clean};
 use super::office::{
     apply_office_metadata_edit, remove_office_metadata, verify_office_metadata_clean,
 };
+use super::{run_cleanup_with_sender, CleanupEvent};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
@@ -99,6 +100,53 @@ fn apply_office_metadata_edit_updates_author() -> Result<(), Box<dyn std::error:
         .read_to_string(&mut core_contents)?;
 
     assert!(core_contents.contains("<dc:creator>Nuevo Autor</dc:creator>"));
+
+    Ok(())
+}
+
+#[test]
+fn cleanup_emits_progress_and_cleans_image() -> Result<(), Box<dyn std::error::Error>> {
+    const SAMPLE_IMAGE_WITH_EXIF: &[u8] = include_bytes!("../../tests/data/exif_sample.png");
+
+    let dir = tempdir()?;
+    let source = dir.path().join("cleanup.png");
+    std::fs::write(&source, SAMPLE_IMAGE_WITH_EXIF)?;
+
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let path = source.clone();
+    let handle = std::thread::spawn(move || run_cleanup_with_sender(vec![path], sender));
+
+    let mut events = Vec::new();
+    for event in receiver.iter() {
+        events.push(event);
+        if matches!(events.last(), Some(CleanupEvent::Finished { .. })) {
+            break;
+        }
+    }
+
+    handle
+        .join()
+        .map_err(|_| "La limpieza por lote fallo")?
+        .map_err(|err| Box::<dyn std::error::Error>::from(err.to_string()))?;
+
+    assert!(matches!(
+        events.first(),
+        Some(CleanupEvent::Started { total: 1 })
+    ));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        CleanupEvent::Processing { index: 1, total: 1, .. }
+    )));
+    assert!(events.iter().any(|event| matches!(event, CleanupEvent::Success { .. })));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        CleanupEvent::Finished { successes: 1, failures: 0 }
+    )));
+
+    assert!(source.exists());
+    assert!(
+        verify_image_metadata_clean(&source).expect("la verificacion de la imagen limpia fallo")
+    );
 
     Ok(())
 }

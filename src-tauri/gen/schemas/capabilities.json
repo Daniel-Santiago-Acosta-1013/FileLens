@@ -1,1 +1,1 @@
-{}
+{"default":{"identifier":"default","description":"Permisos base para la ventana principal de FileLens","local":true,"windows":["main"],"permissions":["core:default","core:event:default"]}}

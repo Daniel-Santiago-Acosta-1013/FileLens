@@ -24,3 +24,17 @@ export type CleanupState = {
   lastError: string;
   finished: boolean;
 };
+
+export type CleanAnalysisStatus = "queued" | "analyzing" | "ready" | "error";
+
+export type CleanCleanupStatus = "idle" | "queued" | "cleaning" | "success" | "error";
+
+export type CleanFileItem = {
+  path: string;
+  name: string;
+  analysisStatus: CleanAnalysisStatus;
+  analysisError: string;
+  report: import("./metadata").MetadataReport | null;
+  cleanupStatus: CleanCleanupStatus;
+  cleanupError: string;
+};

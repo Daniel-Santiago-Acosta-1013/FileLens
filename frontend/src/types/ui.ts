@@ -1,4 +1,4 @@
-export type ViewId = "analyze" | "clean";
+export type ViewId = "analyze" | "clean" | "logs";
 
 export type ToastKind = "info" | "success" | "warning" | "error";
 
@@ -7,7 +7,16 @@ export type Toast = {
   message: string;
 };
 
-export type Filter = "all" | "images" | "office";
+export type LogLevel = "info" | "success" | "warning" | "error";
+
+export type LogEntry = {
+  id: string;
+  time: string;
+  level: LogLevel;
+  context: string;
+  message: string;
+  detail: string;
+};
 
 export type OfficeField = "author" | "title" | "subject" | "company";
 

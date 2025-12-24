@@ -44,6 +44,18 @@ fn analyze_files(paths: Vec<String>) -> Result<DirectoryAnalysisSummary, String>
 }
 
 #[tauri::command]
+fn list_cleanup_files(path: String, recursive: bool, filter: String) -> Result<Vec<String>, String> {
+    let filter = parse_filter(&filter)?;
+    let dir = PathBuf::from(path);
+    let mut files = collect_candidate_files(&dir, recursive, filter)?;
+    files.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
+    Ok(files
+        .into_iter()
+        .map(|path| path.display().to_string())
+        .collect())
+}
+
+#[tauri::command]
 fn search_files(query: String) -> Result<Vec<String>, String> {
     let results = find_files_quiet(query.trim());
     Ok(results
@@ -267,6 +279,7 @@ fn main() {
             analyze_file,
             analyze_directory,
             analyze_files,
+            list_cleanup_files,
             search_files,
             search_directories,
             remove_metadata,

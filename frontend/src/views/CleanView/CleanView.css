@@ -1,14 +1,218 @@
-.file-list {
+.clean-toolbar {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 6px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 4px;
 }
 
-.file-item {
-  font-size: 0.85rem;
+.clean-count {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 0.9rem;
   color: var(--muted);
+}
+
+.clean-count strong {
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.clean-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.clean-card {
+  position: relative;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 140px;
+  overflow: hidden;
+}
+
+.clean-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.clean-card__title {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.clean-card__title strong {
+  font-size: 0.95rem;
+}
+
+.clean-card__title .muted {
+  font-size: 0.78rem;
   word-break: break-all;
+}
+
+.clean-card__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.clean-card__actions button {
+  padding: 7px 10px;
+  font-size: 0.8rem;
+}
+
+.status-pill {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  align-self: flex-start;
+}
+
+.status--ready {
+  background: rgba(43, 217, 200, 0.12);
+  border-color: rgba(43, 217, 200, 0.4);
+  color: #baf3ec;
+}
+
+.status--active {
+  background: rgba(43, 217, 200, 0.08);
+  border-color: rgba(43, 217, 200, 0.25);
+  color: var(--accent);
+}
+
+.status--muted {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: var(--muted);
+}
+
+.status--success {
+  background: rgba(43, 217, 200, 0.2);
+  border-color: rgba(43, 217, 200, 0.5);
+  color: #d6fff8;
+}
+
+.status--error {
+  background: rgba(255, 107, 107, 0.15);
+  border-color: rgba(255, 107, 107, 0.35);
+  color: #ffb4b4;
+}
+
+.clean-card.is-loading::before,
+.clean-card.is-loading::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.clean-card.is-loading::before {
+  background: linear-gradient(
+    120deg,
+    rgba(43, 217, 200, 0) 0%,
+    rgba(43, 217, 200, 0.16) 45%,
+    rgba(43, 217, 200, 0) 70%
+  );
+  transform: translateX(-100%);
+  animation: clean-card-shimmer 1.6s ease-in-out infinite;
+  opacity: 0.7;
+}
+
+.clean-card.is-loading::after {
+  background: rgba(43, 217, 200, 0.06);
+}
+
+.clean-card.is-loading > * {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes clean-card-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(20%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.clean-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 10, 14, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 40;
+  backdrop-filter: blur(8px);
+}
+
+.clean-modal {
+  width: min(880px, 100%);
+  max-height: 85vh;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.clean-modal__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.clean-modal__title {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.clean-modal__body {
+  padding: 18px;
+  overflow-y: auto;
+}
+
+.meta-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.meta-group {
+  margin-top: 10px;
+}
+
+.section-title {
+  margin-bottom: 6px;
+  font-size: 0.75rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 .summary {
@@ -28,19 +232,4 @@
   flex-direction: column;
   gap: 6px;
   margin-top: 6px;
-}
-
-.progress {
-  width: 100%;
-  height: 6px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  overflow: hidden;
-  margin-bottom: 10px;
-}
-
-.progress-bar {
-  height: 100%;
-  background: linear-gradient(90deg, var(--accent), #8be9dd);
-  transition: width 0.25s ease;
 }
